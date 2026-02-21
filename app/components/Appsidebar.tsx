@@ -30,7 +30,18 @@ import { UserButton } from "@clerk/nextjs";
 const NAV_ITEMS = [
   { label: "Dashboard", path: "/studio", icon: Home, badge: undefined },
   { label: "Generate AI", path: "/generate", icon: Sparkles, badge: undefined },
-  { label: "My Pieces", path: "/pieces", icon: LayoutTemplate, badge: undefined },
+  {
+    label: "My Pieces AI",
+    path: "/pieces",
+    icon: LayoutTemplate,
+    badge: undefined,
+  },
+  {
+    label: "My Pieces Random",
+    path: "/songs",
+    icon: LayoutTemplate,
+    badge: undefined,
+  },
 ];
 
 export function AppSidebar() {

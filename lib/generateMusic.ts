@@ -7,25 +7,41 @@ ABSOLUTE RULES — violating these makes the piece unplayable:
 2. Use proper voice leading: avoid large random leaps, prefer stepwise motion, resolve tendency tones.
 3. End every phrase on a stable tone (tonic, 3rd, or 5th). End the piece on the tonic.
 4. Chord tones should dominate (70%+ of notes should be chord tones); passing/neighbor tones add colour.
-5. ALWAYS include quavers (duration 0.5) unless difficulty is beginner. Quavers make music sound alive.
+5. ALWAYS include quavers (duration 0.5) unless difficulty is beginner.
 6. Repetition is essential: the A section must return recognisably. The B section should contrast.
 7. Pitch strings must be formatted as NoteName+Octave e.g. "C4", "F#4", "Bb3". No spaces.
 8. Rest objects must have: { "pitch": "rest", "duration": X, "rest": true }
 
 DIFFICULTY GUIDE:
-- beginner: Only quarter (1) and half (2) notes. Stepwise or small leaps. One octave range max. Short sections (2-4 bars).
-- intermediate: Include quavers (0.5) for melodic runs. Leaps up to a 6th. 4-bar sections. Mix of note values including occasional dotted quarters (1.5).
-- advanced: Freely use quavers (0.5) and semiquavers (0.25). Syncopation welcome. Wide range. 4-8 bar sections.
+- beginner: Only quarter (1) and half (2) notes. Stepwise motion. One octave range max. 2–4 bars per section.
+- intermediate: Include quavers (0.5). Leaps up to a 6th. 4 bars per section.
+- advanced: Freely use quavers (0.5) and semiquavers (0.25). Syncopation welcome. 4–8 bars per section.
 
-STRUCTURE GUIDE (use these patterns in the "structure" array):
-- ABA: [A, A, B, A] — classic ternary. B section contrasts.
-- AABA: [A, A, B, A] — 32-bar form common in jazz/pop.
-- AB: [A, B] — simple binary.
-- AABB: [A, A, B, B] — both sections repeated.
-- ABACA: [A, B, A, C, A] — rondo. C section adds further contrast.
-- through: [A, B, C] — through-composed, no repeats.
+STRUCTURE GUIDE:
+- ABA
+- AABA
+- AB
+- AABB
+- ABACA
+- through
 
-Return ONLY valid JSON (no markdown, no explanation) matching this exact schema:
+NOTATION RULES:
+
+If notation is "classical":
+- You are writing for TWO-STAVE PIANO (treble + bass).
+- EVERY bar MUST include a "leftNotes" array.
+- leftNotes MUST sum exactly to the bar duration.
+- leftNotes MUST contain at least one note.
+- leftNotes must outline the chord (root, 5th, broken chord, alberti bass, or waltz pattern).
+- Bass range must stay between C2 and C4.
+- Both staves must contain playable notes in EVERY bar.
+
+If notation is "lead-sheet":
+- Do NOT include "leftNotes" in any bar.
+- Only generate melody in "notes".
+
+Return ONLY valid JSON (no markdown, no explanation) matching this schema:
+
 {
   "title": "string",
   "key": "string",
@@ -38,33 +54,34 @@ Return ONLY valid JSON (no markdown, no explanation) matching this exact schema:
   "sections": [
     {
       "id": "A",
-      "label": "string description",
+      "label": "string",
       "bars": [
         {
           "chord": "I",
           "chordName": "C major",
           "notes": [
-            { "pitch": "E4", "duration": 1 },
-            { "pitch": "F4", "duration": 0.5 },
-            { "pitch": "E4", "duration": 0.5 },
-            { "pitch": "D4", "duration": 1 },
-            { "pitch": "C4", "duration": 1 }
+            { "pitch": "E4", "duration": 1 }
+          ],
+          "leftNotes": [
+            { "pitch": "C3", "duration": 2 }
           ]
         }
       ]
     }
   ],
   "structure": ["A","A","B","A"],
-  "description": "Performance notes for the player"
-}`;
+  "description": "Performance notes"
+}
+`;
 
 export async function generateMusicPiece(
   opts: GenerateOptions,
 ): Promise<MusicPiece> {
-  const { prompt, key, timeSig, difficulty, genre, structure } = opts;
+  const { prompt, key, timeSig, difficulty, genre, structure, notation } = opts;
 
   const keyDisplay =
     key === "auto" ? "choose the most musically fitting key" : key;
+
   const timeSigDisplay =
     timeSig === "auto"
       ? "choose the most appropriate time signature for the genre"
@@ -77,33 +94,19 @@ export async function generateMusicPiece(
 
 Parameters:
 - Key: ${keyDisplay}
-- Time signature: ${timeSigDisplay}  
+- Time signature: ${timeSigDisplay}
 - Difficulty: ${difficulty}
 - Genre: ${genre}
-- Structure: ${structure} — use the structure pattern for the "structure" array
+- Structure: ${structure}
 - Bars per section: ${barsPerSection}
+- Notation: ${notation}
 
 Requirements:
-- The melody must tell a musical story with a clear beginning, development, and resolution
-- Include genuine melodic repetition: the opening motive should return in the A section
-- The B section should modulate in character (not necessarily key) — contrast in register, rhythm, or mood
-- For ${difficulty} difficulty, note values used: ${
-    difficulty === "beginner"
-      ? "quarters (1) and halves (2) ONLY"
-      : difficulty === "intermediate"
-        ? "halves (2), quarters (1), and quavers (0.5) — include quavers in melodic runs"
-        : "all values including quavers (0.5) and semiquavers (0.25) — use them freely"
-  }
-- Chord progression should follow ${genre} conventions: ${
-    genre === "jazz"
-      ? "ii-V-I progressions, dominant 7ths, extended chords"
-      : genre === "blues"
-        ? "I-IV-V blues progression with blue notes"
-        : genre === "baroque"
-          ? "circle of fifths sequences, suspensions, continuo-style bass"
-          : "classical functional harmony with clear cadences"
-  }
-- End the final bar of the piece with a perfect authentic cadence (V → I)`;
+- Clear musical narrative: beginning, development, resolution
+- Motivic repetition in A section
+- Contrasting B section
+- End with a perfect authentic cadence (V → I)
+`;
 
   const response = await fetch("/api/compose", {
     method: "POST",
@@ -125,24 +128,49 @@ Requirements:
     text?: string;
   }
 
-  const data = (await response.json()) as { content?: AnthropicContentBlock[] };
-  const text: string = data.content?.map((c) => c.text ?? "").join("") ?? "";
+  const data = (await response.json()) as {
+    content?: AnthropicContentBlock[];
+  };
 
-  // Extract JSON — the model sometimes wraps in markdown
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("No JSON found in AI response");
+  const text = data.content?.map((c) => c.text ?? "").join("") ?? "";
+
+  // ✅ Safer JSON extraction
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1) {
+    throw new Error("No JSON found in AI response");
+  }
+
+  const jsonString = text.slice(firstBrace, lastBrace + 1);
 
   let piece: MusicPiece;
+
   try {
-    piece = JSON.parse(jsonMatch[0]);
+    piece = JSON.parse(jsonString);
+
+    console.log("🎼 Generated piece:", JSON.stringify(piece, null, 2));
+    console.log(
+      "🎼 First bar leftNotes:",
+      piece.sections?.[0]?.bars?.[0]?.leftNotes,
+    );
+
+    // 🔍 Extra validation for classical mode
+    if (notation === "classical") {
+      const firstBar = piece.sections?.[0]?.bars?.[0];
+      if (!firstBar?.leftNotes || firstBar.leftNotes.length === 0) {
+        console.warn(
+          "⚠️ Classical notation requested but leftNotes missing or empty.",
+        );
+      }
+    }
   } catch (e) {
     throw new Error("Invalid JSON from AI: " + (e as Error).message);
   }
 
-  // Validate basic structure
   if (!piece.sections || !Array.isArray(piece.sections)) {
     throw new Error("Piece missing sections array");
   }
+
   if (!piece.structure || !Array.isArray(piece.structure)) {
     piece.structure = piece.sections.map((s) => s.id);
   }

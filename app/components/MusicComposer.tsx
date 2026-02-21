@@ -235,7 +235,7 @@
 import { useState, useCallback } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import ComposerForm from "../components/Composerform";
+
 import ScoreRenderer from "../components/Scorerenderer";
 import ScoreInfo from "../components/Scoreinfo";
 import PlaybackBar from "../components/Playbackbar";
@@ -252,6 +252,7 @@ import type {
 } from "../../types/music";
 import jsPDF from "jspdf";
 import { CheckCircle, Loader2 } from "lucide-react";
+import ComposerForm, { type NotationStyle } from "./Composerform";
 
 export default function MusicComposer() {
   const [prompt, setPrompt] = useState("");
@@ -260,6 +261,7 @@ export default function MusicComposer() {
   const [difficulty, setDifficulty] = useState<Difficulty>("intermediate");
   const [genre, setGenre] = useState<Genre>("classical");
   const [structure, setStructure] = useState<StructureType>("ABA");
+  const [notation, setNotation] = useState<NotationStyle>("classical");
 
   const [piece, setPiece] = useState<MusicPiece | null>(null);
   const [clef, setClef] = useState<Clef>("treble");
@@ -285,11 +287,11 @@ export default function MusicComposer() {
         difficulty,
         genre,
         structure,
+        notation,
       });
       setPiece(result);
       setTempo(result.tempo ?? 90);
 
-      // Auto-save to library
       setSaveState("saving");
       try {
         await savePiece({
@@ -306,6 +308,7 @@ export default function MusicComposer() {
           sections: result.sections as any,
           structure: result.structure,
           description: result.description,
+          notation,
         });
         setSaveState("saved");
       } catch (saveErr) {
@@ -324,6 +327,7 @@ export default function MusicComposer() {
     difficulty,
     genre,
     structure,
+    notation,
     stop,
     setTempo,
     savePiece,
@@ -374,6 +378,7 @@ export default function MusicComposer() {
             difficulty={difficulty}
             genre={genre}
             structure={structure}
+            notation={notation}
             isLoading={isLoading}
             onPromptChange={setPrompt}
             onKeyChange={setMusicalKey}
@@ -381,6 +386,7 @@ export default function MusicComposer() {
             onDifficultyChange={setDifficulty}
             onGenreChange={setGenre}
             onStructureChange={setStructure}
+            onNotationChange={setNotation}
             onGenerate={handleGenerate}
           />
         </aside>
@@ -440,14 +446,17 @@ export default function MusicComposer() {
                       <CheckCircle className="w-3 h-3" /> Saved to library
                     </span>
                   )}
-                  <button
-                    onClick={() =>
-                      setClef((c) => (c === "treble" ? "bass" : "treble"))
-                    }
-                    className="text-xs font-mono border border-stone-700 text-stone-400 hover:border-amber-500 hover:text-amber-400 rounded px-3 py-1.5 transition-colors"
-                  >
-                    {clef === "treble" ? "Treble Clef" : "Bass Clef"}
-                  </button>
+                  {/* Hide clef toggle in grand staff mode — both clefs always shown */}
+                  {notation !== "classical" && (
+                    <button
+                      onClick={() =>
+                        setClef((c) => (c === "treble" ? "bass" : "treble"))
+                      }
+                      className="text-xs font-mono border border-stone-700 text-stone-400 hover:border-amber-500 hover:text-amber-400 rounded px-3 py-1.5 transition-colors"
+                    >
+                      {clef === "treble" ? "Treble Clef" : "Bass Clef"}
+                    </button>
+                  )}
                   <button
                     onClick={handleDownloadPDF}
                     className="text-xs font-mono border border-stone-700 text-stone-400 hover:border-amber-500 hover:text-amber-400 rounded px-3 py-1.5 transition-colors"
@@ -464,7 +473,8 @@ export default function MusicComposer() {
               </div>
 
               <div className="overflow-x-auto rounded-lg shadow-2xl">
-                <ScoreRenderer piece={piece} clef={clef} />
+                <ScoreRenderer piece={piece} clef={clef} notation={notation} />{" "}
+                {/* 👈 notation passed */}
               </div>
 
               <ScoreInfo piece={piece} />

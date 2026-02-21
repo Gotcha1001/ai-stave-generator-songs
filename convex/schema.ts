@@ -46,6 +46,7 @@ const barValidator = v.object({
   chord: v.string(),
   chordName: v.optional(v.string()),
   notes: v.array(noteValidator),
+  leftNotes: v.optional(v.array(noteValidator)),
 });
 
 const sectionValidator = v.object({
@@ -76,9 +77,43 @@ export default defineSchema({
     difficulty: v.string(),
     prompt: v.string(),
     chordProgression: v.array(v.string()),
-    sections: v.array(sectionValidator),
     structure: v.array(v.string()),
     description: v.optional(v.string()),
+    notation: v.optional(
+      // 👈 add this
+      v.union(v.literal("lead-sheet"), v.literal("classical")),
+    ),
+    sections: v.array(
+      v.object({
+        id: v.string(),
+        label: v.string(),
+        bars: v.array(
+          v.object({
+            chord: v.string(),
+            chordName: v.optional(v.string()),
+            notes: v.array(
+              v.object({
+                pitch: v.string(),
+                duration: v.union(v.string(), v.number()),
+                rest: v.optional(v.boolean()),
+                tied: v.optional(v.boolean()),
+              }),
+            ),
+            leftNotes: v.optional(
+              v.array(
+                // 👈 add this
+                v.object({
+                  pitch: v.string(),
+                  duration: v.union(v.string(), v.number()),
+                  rest: v.optional(v.boolean()),
+                  tied: v.optional(v.boolean()),
+                }),
+              ),
+            ),
+          }),
+        ),
+      }),
+    ),
     createdAt: v.number(),
   }).index("by_user", ["userId"]),
 
