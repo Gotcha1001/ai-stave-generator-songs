@@ -55,6 +55,7 @@
 //       .collect();
 //   },
 // });
+
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
@@ -71,6 +72,7 @@ const barValidator = v.object({
   chord: v.string(),
   chordName: v.optional(v.string()),
   notes: v.array(noteValidator),
+  leftNotes: v.optional(v.array(noteValidator)),
 });
 
 const sectionValidator = v.object({
@@ -95,6 +97,9 @@ export const savePiece = mutation({
     sections: v.array(sectionValidator),
     structure: v.array(v.string()),
     description: v.optional(v.string()),
+    notation: v.optional(
+      v.union(v.literal("lead-sheet"), v.literal("classical")),
+    ),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -182,7 +187,7 @@ export const getPieceById = query({
   },
 });
 
-// ── Legacy ────────────────────────────────────────────────────────────────────
+// ── Legacy / Studio songs ─────────────────────────────────────────────────────
 
 export const createSong = mutation({
   args: {
@@ -220,6 +225,39 @@ export const getMySongs = query({
     return await ctx.db
       .query("songs")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .order("desc")
       .collect();
+  },
+});
+
+export const getSongById = query({
+  args: { id: v.id("songs") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const song = await ctx.db.get(args.id);
+    if (!song) return null;
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", identity.subject))
+      .first();
+    if (!user || song.userId !== user._id) return null;
+    return song;
+  },
+});
+
+export const deleteSong = mutation({
+  args: { id: v.id("songs") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthorized");
+    const song = await ctx.db.get(args.id);
+    if (!song) throw new Error("Not found");
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", identity.subject))
+      .first();
+    if (!user || song.userId !== user._id) throw new Error("Forbidden");
+    await ctx.db.delete(args.id);
   },
 });

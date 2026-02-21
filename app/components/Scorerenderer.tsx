@@ -2,7 +2,7 @@
 
 // import { useEffect, useRef } from "react";
 // import type { MusicPiece, Bar } from "../../types/music";
-// import type { Clef } from "../../types/music";
+// import type { Clef, NotationStyle } from "../../types/music";
 // import {
 //   parsePitch,
 //   getStaffPosition,
@@ -12,6 +12,7 @@
 // interface ScoreRendererProps {
 //   piece: MusicPiece;
 //   clef: Clef;
+//   notation: NotationStyle; // 👈 added
 //   className?: string;
 // }
 
@@ -21,7 +22,7 @@
 // const MARGIN_LEFT = 90;
 // const MARGIN_RIGHT = 40;
 // const MARGIN_TOP = 70;
-// const ROW_HEIGHT = 140;
+// const STAFF_GAP = 50; // gap between treble and bass staves (grand staff only)
 
 // const SECTION_COLORS: Record<string, string> = {
 //   A: "#c9973a",
@@ -33,6 +34,7 @@
 // export default function ScoreRenderer({
 //   piece,
 //   clef,
+//   notation,
 //   className,
 // }: ScoreRendererProps) {
 //   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,6 +46,11 @@
 //     const ctx = canvas.getContext("2d");
 //     if (!ctx) return;
 
+//     const isGrandStaff = notation === "classical";
+
+//     // Row height depends on notation — grand staff needs room for two staves
+//     const ROW_HEIGHT = isGrandStaff ? 4 * SL + STAFF_GAP + 4 * SL + 60 : 140;
+
 //     // Build flat bar list with section tags
 //     const bars: Array<Bar & { sectionId: string }> = [];
 //     for (const secId of piece.structure) {
@@ -54,7 +61,6 @@
 //         }
 //       }
 //     }
-//     // Fallback: iterate sections directly if structure doesn't map properly
 //     if (bars.length === 0) {
 //       for (const sec of piece.sections) {
 //         for (const bar of sec.bars || []) {
@@ -98,14 +104,14 @@
 //     for (let row = 0; row < numRows; row++) {
 //       const rowBars = bars.slice(row * BARS_PER_ROW, (row + 1) * BARS_PER_ROW);
 //       const staffTop = MARGIN_TOP + row * ROW_HEIGHT;
+//       const bassTop = staffTop + 4 * SL + STAFF_GAP; // only used in grand staff mode
 
-//       // Per-row clef width so staff lines and content can accommodate it
-//       const CLEF_WIDTH = clef === "treble" ? 22 : 18;
+//       const CLEF_WIDTH = 22;
+//       const staffRight = MARGIN_LEFT + rowBars.length * BAR_WIDTH;
 
-//       // 5 staff lines
+//       // ── Treble staff lines ──────────────────────────────────────
 //       ctx.strokeStyle = "#2a2015";
 //       ctx.lineWidth = 0.8;
-//       const staffRight = MARGIN_LEFT + rowBars.length * BAR_WIDTH;
 //       for (let l = 0; l < 5; l++) {
 //         const y = staffTop + l * SL;
 //         ctx.beginPath();
@@ -114,81 +120,106 @@
 //         ctx.stroke();
 //       }
 
-//       // Left edge vertical line (continuation rows only)
+//       // ── Bass staff lines (grand staff only) ────────────────────
+//       if (isGrandStaff) {
+//         for (let l = 0; l < 5; l++) {
+//           const y = bassTop + l * SL;
+//           ctx.beginPath();
+//           ctx.moveTo(MARGIN_LEFT - CLEF_WIDTH, y);
+//           ctx.lineTo(staffRight, y);
+//           ctx.stroke();
+//         }
+
+//         // Brace connecting both staves on left edge
+//         ctx.strokeStyle = "#2a2015";
+//         ctx.lineWidth = 2;
+//         ctx.beginPath();
+//         ctx.moveTo(MARGIN_LEFT - CLEF_WIDTH - 1, staffTop);
+//         ctx.lineTo(MARGIN_LEFT - CLEF_WIDTH - 1, bassTop + 4 * SL);
+//         ctx.stroke();
+//         ctx.lineWidth = 0.8;
+//       }
+
+//       // Left edge vertical line (continuation rows)
 //       if (row > 0) {
 //         ctx.strokeStyle = "#2a2015";
 //         ctx.lineWidth = 1;
 //         ctx.beginPath();
 //         ctx.moveTo(MARGIN_LEFT - CLEF_WIDTH, staffTop);
-//         ctx.lineTo(MARGIN_LEFT - CLEF_WIDTH, staffTop + 4 * SL);
+//         ctx.lineTo(
+//           MARGIN_LEFT - CLEF_WIDTH,
+//           isGrandStaff ? bassTop + 4 * SL : staffTop + 4 * SL,
+//         );
 //         ctx.stroke();
 //       }
 
-//       // Clef
+//       // ── Treble clef ─────────────────────────────────────────────
 //       ctx.fillStyle = "#1a1510";
-//       if (clef === "treble") {
-//         ctx.font = `${SL * 6.5}px serif`;
-//         ctx.textAlign = "left";
-//         ctx.fillText("𝄞", MARGIN_LEFT - CLEF_WIDTH + 1, staffTop + SL * 4.2);
-//       } else {
+//       ctx.font = `${SL * 6.5}px serif`;
+//       ctx.textAlign = "left";
+//       ctx.fillText("𝄞", MARGIN_LEFT - CLEF_WIDTH + 1, staffTop + SL * 4.2);
+
+//       // ── Bass clef (grand staff only) ────────────────────────────
+//       if (isGrandStaff) {
 //         ctx.font = `${SL * 4.2}px serif`;
 //         ctx.textAlign = "left";
-//         ctx.fillText("𝄢", MARGIN_LEFT - CLEF_WIDTH + 1, staffTop + SL * 2.2);
+//         ctx.fillText("𝄢", MARGIN_LEFT - CLEF_WIDTH + 1, bassTop + SL * 2.2);
 //       }
 
-//       // Key signature — first row only
+//       // ── Key signature (first row only) ──────────────────────────
 //       let ksSigWidth = 0;
 //       if (ks && row === 0) {
 //         ksSigWidth = drawKeySignature(ctx, MARGIN_LEFT + 10, staffTop, ks, SL);
+//         if (isGrandStaff) {
+//           drawKeySignature(ctx, MARGIN_LEFT + 10, bassTop, ks, SL);
+//         }
 //       }
 
-//       // Time signature (first row only)
+//       // ── Time signature (first row only) ─────────────────────────
 //       let headerEndX = MARGIN_LEFT;
-
 //       if (row === 0) {
 //         const [top, bot] = piece.timeSig.split("/");
-
 //         const tsX = MARGIN_LEFT + ksSigWidth + 20;
 
 //         ctx.fillStyle = "#1a1510";
 //         ctx.font = `bold ${SL * 2.4}px "Georgia", serif`;
 //         ctx.textAlign = "center";
-
 //         ctx.fillText(top, tsX, staffTop + SL * 1.6);
 //         ctx.fillText(bot, tsX, staffTop + SL * 3.8);
 
-//         // FIX 1: Tighter spacing after time signature (was +18, now +10)
+//         if (isGrandStaff) {
+//           ctx.fillText(top, tsX, bassTop + SL * 1.6);
+//           ctx.fillText(bot, tsX, bassTop + SL * 3.8);
+//         }
+
 //         headerEndX = tsX + 10;
 //       }
 
-//       // Draw each bar
+//       // ── Draw each bar ────────────────────────────────────────────
 //       for (let b = 0; b < rowBars.length; b++) {
 //         const bar = rowBars[b];
 
-//         // FIX 2: Only bar 0 on row 0 gets the header offset.
-//         // Continuation rows (row > 0, b === 0) get a small clef clearance offset.
-//         // All other bars use MARGIN_LEFT as base so bar 4 stays within staff bounds.
 //         const barX =
 //           row === 0 && b === 0
 //             ? headerEndX + 6
 //             : row > 0 && b === 0
-//               ? MARGIN_LEFT + 14 // small nudge right so notes clear the clef
+//               ? MARGIN_LEFT + 14
 //               : MARGIN_LEFT + b * BAR_WIDTH;
 
 //         const globalIdx = row * BARS_PER_ROW + b;
 //         const prevBar = globalIdx > 0 ? bars[globalIdx - 1] : null;
 
-//         // Bar line (left edge): skip b===0 every row, suppress lines inside header zone
+//         // Treble bar line
 //         if (b > 0 && barX >= headerEndX) {
 //           ctx.strokeStyle = "#2a2015";
 //           ctx.lineWidth = 1;
 //           ctx.beginPath();
 //           ctx.moveTo(barX, staffTop);
-//           ctx.lineTo(barX, staffTop + 4 * SL);
+//           ctx.lineTo(barX, isGrandStaff ? bassTop + 4 * SL : staffTop + 4 * SL);
 //           ctx.stroke();
 //         }
 
-//         // Section label above bar
+//         // Section label
 //         const secColor = SECTION_COLORS[bar.sectionId] || "#888";
 //         if (!prevBar || prevBar.sectionId !== bar.sectionId) {
 //           ctx.fillStyle = secColor;
@@ -203,7 +234,7 @@
 //         ctx.textAlign = "left";
 //         ctx.fillText(String(globalIdx + 1), barX + 2, staffTop - 4);
 
-//         // Chord symbol
+//         // Chord symbol (above treble staff)
 //         if (bar.chordName || bar.chord) {
 //           ctx.fillStyle = "#6b5c44";
 //           ctx.font = 'italic 10px "Georgia", serif';
@@ -215,35 +246,61 @@
 //           );
 //         }
 
-//         // Notes
-//         drawBarNotes(ctx, bar, barX, staffTop, piece.timeSig, clef, SL);
+//         const barRight = MARGIN_LEFT + (b + 1) * BAR_WIDTH;
+
+//         // Right hand notes (treble)
+//         drawBarNotes(
+//           ctx,
+//           bar,
+//           barX,
+//           barRight,
+//           staffTop,
+//           piece.timeSig,
+//           "treble",
+//           SL,
+//         );
+
+//         // Left hand notes (bass) — grand staff only
+//         if (isGrandStaff && bar.leftNotes?.length) {
+//           drawBarNotes(
+//             ctx,
+//             { ...bar, notes: bar.leftNotes },
+//             barX,
+//             barRight,
+//             bassTop,
+//             piece.timeSig,
+//             "bass",
+//             SL,
+//           );
+//         }
 //       }
 
-//       // Final bar line of this row
+//       // ── Final bar line of this row ───────────────────────────────
 //       const lastX = MARGIN_LEFT + rowBars.length * BAR_WIDTH;
 //       ctx.strokeStyle = "#2a2015";
+//       const lineBottom = isGrandStaff ? bassTop + 4 * SL : staffTop + 4 * SL;
+
 //       if (row === numRows - 1) {
-//         // Double final bar line
 //         ctx.lineWidth = 1;
 //         ctx.beginPath();
 //         ctx.moveTo(lastX - 3, staffTop);
-//         ctx.lineTo(lastX - 3, staffTop + 4 * SL);
+//         ctx.lineTo(lastX - 3, lineBottom);
 //         ctx.stroke();
 //         ctx.lineWidth = 3;
 //         ctx.beginPath();
 //         ctx.moveTo(lastX, staffTop);
-//         ctx.lineTo(lastX, staffTop + 4 * SL);
+//         ctx.lineTo(lastX, lineBottom);
 //         ctx.stroke();
 //         ctx.lineWidth = 1;
 //       } else {
 //         ctx.lineWidth = 1;
 //         ctx.beginPath();
 //         ctx.moveTo(lastX, staffTop);
-//         ctx.lineTo(lastX, staffTop + 4 * SL);
+//         ctx.lineTo(lastX, lineBottom);
 //         ctx.stroke();
 //       }
 //     }
-//   }, [piece, clef]);
+//   }, [piece, clef, notation]); // 👈 notation in deps
 
 //   return (
 //     <canvas
@@ -260,6 +317,7 @@
 //   ctx: CanvasRenderingContext2D,
 //   bar: Bar,
 //   barX: number,
+//   barRight: number,
 //   staffTop: number,
 //   timeSig: string,
 //   clef: Clef,
@@ -267,16 +325,33 @@
 // ) {
 //   const notes = bar.notes || [];
 //   const totalDur = notes.reduce((s, n) => s + n.duration, 0);
-//   const drawWidth = BAR_WIDTH - 24;
-//   // FIX 3: Reduced left padding inside bar from 16 to 10
-//   let xCursor = barX + 10;
-
-//   // Detect quaver runs for beam grouping
-//   const beamGroups = groupQuaversForBeaming(notes);
+//   const isFirstBar = barX > MARGIN_LEFT && barX < MARGIN_LEFT + BAR_WIDTH;
+//   const firstNoteHasAccidental = (() => {
+//     const first = notes[0];
+//     if (!first || first.rest || first.pitch === "rest") return false;
+//     const p = parsePitch(first.pitch);
+//     return p ? p.note.includes("#") || p.note.includes("b") : false;
+//   })();
+//   const innerLeft = barX + (isFirstBar ? (firstNoteHasAccidental ? 8 : 2) : 10);
+//   const drawWidth = barRight - innerLeft - 14;
+//   let xCursor = innerLeft;
 
 //   for (let i = 0; i < notes.length; i++) {
 //     const note = notes[i];
 //     const noteWidth = (note.duration / Math.max(totalDur, 1)) * drawWidth;
+
+//     const parsed =
+//       !note.rest && note.pitch !== "rest" ? parsePitch(note.pitch) : null;
+//     const hasAccidental = parsed
+//       ? parsed.note.includes("#") || parsed.note.includes("b")
+//       : false;
+//     const accidentalShift = hasAccidental
+//       ? isFirstBar
+//         ? sl * 1.8
+//         : sl * 1.2
+//       : 0;
+
+//     xCursor += accidentalShift;
 //     const cx = xCursor + noteWidth * 0.5;
 
 //     if (note.rest || note.pitch === "rest") {
@@ -323,7 +398,6 @@
 //   const rh = sl * 0.46;
 //   const filled = duration < 2;
 
-//   // Ledger lines above staff
 //   const topLine = staffTop;
 //   const bottomLine = staffTop + 4 * sl;
 
@@ -346,7 +420,6 @@
 //     }
 //   }
 
-//   // Note head
 //   ctx.save();
 //   ctx.fillStyle = filled ? "#1a1510" : "#faf8f2";
 //   ctx.strokeStyle = "#1a1510";
@@ -357,15 +430,13 @@
 //   if (!filled) ctx.stroke();
 //   ctx.restore();
 
-//   // Accidental
 //   if (accidental) {
 //     ctx.fillStyle = "#1a1510";
-//     ctx.font = `${sl * 1.5}px serif`;
+//     ctx.font = `${sl * 2.2}px serif`;
 //     ctx.textAlign = "center";
-//     ctx.fillText(accidental, x - rw * 2.4, y + rh * 0.8);
+//     ctx.fillText(accidental, x - rw * 2.8, y + rh * 0.8);
 //   }
 
-//   // Stem
 //   if (duration <= 2) {
 //     const stemX = stemUp ? x + rw * 0.9 : x - rw * 0.9;
 //     const stemEnd = stemUp ? y - sl * 3.5 : y + sl * 3.5;
@@ -376,7 +447,6 @@
 //     ctx.lineTo(stemX, stemEnd);
 //     ctx.stroke();
 
-//     // Flags for quavers (0.5) and semiquavers (0.25)
 //     if (duration === 0.5) {
 //       drawFlag(ctx, stemX, stemEnd, stemUp, sl, 1);
 //     } else if (duration === 0.25) {
@@ -384,7 +454,6 @@
 //     }
 //   }
 
-//   // Dot for dotted notes (1.5, 3)
 //   if (duration === 1.5 || duration === 3) {
 //     ctx.fillStyle = "#1a1510";
 //     ctx.beginPath();
@@ -443,10 +512,8 @@
 //   const mid = staffTop + 2 * sl;
 
 //   if (duration >= 4) {
-//     // Whole rest: filled rectangle hanging from line 2 (from top)
 //     ctx.fillRect(x - sl * 0.9, staffTop + sl - sl * 0.35, sl * 1.8, sl * 0.55);
 //   } else if (duration >= 2) {
-//     // Half rest: filled rectangle sitting on line 3
 //     ctx.fillRect(x - sl * 0.9, staffTop + 2 * sl, sl * 1.8, sl * 0.55);
 //   } else if (duration === 1 || duration === 1.5) {
 //     ctx.font = `${sl * 2.2}px serif`;
@@ -472,9 +539,8 @@
 //   ks: { sharps: number; flats: number },
 //   sl: number,
 // ): number {
-//   // Staff positions (counting from top line = 0) for sharps: F C G D A E B
-//   const sharpStaffPos = [4, 1, 5, 2, 6, 3, 0]; // treble clef
-//   const flatStaffPos = [2, 5, 1, 4, 0, 3, 6]; // treble clef
+//   const sharpStaffPos = [4, 1, 5, 2, 6, 3, 0];
+//   const flatStaffPos = [2, 5, 1, 4, 0, 3, 6];
 
 //   ctx.fillStyle = "#1a1510";
 //   ctx.font = `${sl * 2.2}px serif`;
@@ -495,7 +561,6 @@
 //   return width;
 // }
 
-// // Simple quaver grouping helper (returns groups of indices that should be beamed)
 // function groupQuaversForBeaming(notes: Bar["notes"]): number[][] {
 //   const groups: number[][] = [];
 //   let current: number[] = [];
@@ -510,12 +575,11 @@
 //   if (current.length >= 2) groups.push(current);
 //   return groups;
 // }
-
 "use client";
 
 import { useEffect, useRef } from "react";
 import type { MusicPiece, Bar } from "../../types/music";
-import type { Clef } from "../../types/music";
+import type { Clef, NotationStyle } from "../../types/music";
 import {
   parsePitch,
   getStaffPosition,
@@ -525,16 +589,17 @@ import {
 interface ScoreRendererProps {
   piece: MusicPiece;
   clef: Clef;
+  notation?: NotationStyle; // optional — falls back to auto-detection
   className?: string;
 }
 
-const SL = 10; // staff line spacing px
+const SL = 10;
 const BARS_PER_ROW = 4;
 const BAR_WIDTH = 165;
 const MARGIN_LEFT = 90;
 const MARGIN_RIGHT = 40;
 const MARGIN_TOP = 70;
-const ROW_HEIGHT = 140;
+const STAFF_GAP = 50;
 
 const SECTION_COLORS: Record<string, string> = {
   A: "#c9973a",
@@ -546,6 +611,7 @@ const SECTION_COLORS: Record<string, string> = {
 export default function ScoreRenderer({
   piece,
   clef,
+  notation,
   className,
 }: ScoreRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -553,11 +619,10 @@ export default function ScoreRenderer({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Build flat bar list with section tags
+    // Build flat bar list
     const bars: Array<Bar & { sectionId: string }> = [];
     for (const secId of piece.structure) {
       const sec = piece.sections.find((s) => s.id === secId);
@@ -567,7 +632,6 @@ export default function ScoreRenderer({
         }
       }
     }
-    // Fallback: iterate sections directly if structure doesn't map properly
     if (bars.length === 0) {
       for (const sec of piece.sections) {
         for (const bar of sec.bars || []) {
@@ -575,6 +639,18 @@ export default function ScoreRenderer({
         }
       }
     }
+
+    // Grand staff mode:
+    // - If notation prop is explicitly "classical", use grand staff
+    // - If notation prop is explicitly "lead-sheet", use single staff
+    // - If notation prop is absent (e.g. pieces/[pieceId] page), auto-detect from leftNotes
+    const hasLeftNotes = bars.some(
+      (b) => b.leftNotes && b.leftNotes.length > 0,
+    );
+    const isGrandStaff =
+      notation === "classical" || (notation === undefined && hasLeftNotes);
+
+    const ROW_HEIGHT = isGrandStaff ? 4 * SL + STAFF_GAP + 4 * SL + 60 : 140;
 
     const numRows = Math.ceil(bars.length / BARS_PER_ROW);
     const canvasW = MARGIN_LEFT + BARS_PER_ROW * BAR_WIDTH + MARGIN_RIGHT;
@@ -587,17 +663,14 @@ export default function ScoreRenderer({
     canvas.style.height = canvasH + "px";
     ctx.scale(dpr, dpr);
 
-    // Background
     ctx.fillStyle = "#faf8f2";
     ctx.fillRect(0, 0, canvasW, canvasH);
 
-    // Title
     ctx.fillStyle = "#1a1510";
     ctx.font = 'bold 18px "Georgia", serif';
     ctx.textAlign = "center";
     ctx.fillText(piece.title, canvasW / 2, 28);
 
-    // Subtitle
     ctx.fillStyle = "#6b5c44";
     ctx.font = "11px monospace";
     ctx.fillText(
@@ -611,14 +684,14 @@ export default function ScoreRenderer({
     for (let row = 0; row < numRows; row++) {
       const rowBars = bars.slice(row * BARS_PER_ROW, (row + 1) * BARS_PER_ROW);
       const staffTop = MARGIN_TOP + row * ROW_HEIGHT;
+      const bassTop = staffTop + 4 * SL + STAFF_GAP;
 
-      // Per-row clef width so staff lines and content can accommodate it
-      const CLEF_WIDTH = clef === "treble" ? 22 : 18;
+      const CLEF_WIDTH = 22;
+      const staffRight = MARGIN_LEFT + rowBars.length * BAR_WIDTH;
 
-      // 5 staff lines
+      // Treble staff lines
       ctx.strokeStyle = "#2a2015";
       ctx.lineWidth = 0.8;
-      const staffRight = MARGIN_LEFT + rowBars.length * BAR_WIDTH;
       for (let l = 0; l < 5; l++) {
         const y = staffTop + l * SL;
         ctx.beginPath();
@@ -627,81 +700,109 @@ export default function ScoreRenderer({
         ctx.stroke();
       }
 
-      // Left edge vertical line (continuation rows only)
+      // Bass staff lines + connecting bar (grand staff only)
+      if (isGrandStaff) {
+        for (let l = 0; l < 5; l++) {
+          const y = bassTop + l * SL;
+          ctx.beginPath();
+          ctx.moveTo(MARGIN_LEFT - CLEF_WIDTH, y);
+          ctx.lineTo(staffRight, y);
+          ctx.stroke();
+        }
+
+        ctx.strokeStyle = "#2a2015";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(MARGIN_LEFT - CLEF_WIDTH - 1, staffTop);
+        ctx.lineTo(MARGIN_LEFT - CLEF_WIDTH - 1, bassTop + 4 * SL);
+        ctx.stroke();
+        ctx.lineWidth = 0.8;
+      }
+
+      // Left edge vertical line (continuation rows)
       if (row > 0) {
         ctx.strokeStyle = "#2a2015";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(MARGIN_LEFT - CLEF_WIDTH, staffTop);
-        ctx.lineTo(MARGIN_LEFT - CLEF_WIDTH, staffTop + 4 * SL);
+        ctx.lineTo(
+          MARGIN_LEFT - CLEF_WIDTH,
+          isGrandStaff ? bassTop + 4 * SL : staffTop + 4 * SL,
+        );
         ctx.stroke();
       }
 
-      // Clef
+      // Treble clef
       ctx.fillStyle = "#1a1510";
-      if (clef === "treble") {
-        ctx.font = `${SL * 6.5}px serif`;
-        ctx.textAlign = "left";
-        ctx.fillText("𝄞", MARGIN_LEFT - CLEF_WIDTH + 1, staffTop + SL * 4.2);
-      } else {
+      ctx.font = `${SL * 6.5}px serif`;
+      ctx.textAlign = "left";
+      ctx.fillText("𝄞", MARGIN_LEFT - CLEF_WIDTH + 1, staffTop + SL * 4.2);
+
+      // Bass clef — grand staff gets it below, single-staff respects clef toggle
+      if (isGrandStaff) {
         ctx.font = `${SL * 4.2}px serif`;
         ctx.textAlign = "left";
-        ctx.fillText("𝄢", MARGIN_LEFT - CLEF_WIDTH + 1, staffTop + SL * 2.2);
+        ctx.fillText("𝄢", MARGIN_LEFT - CLEF_WIDTH + 1, bassTop + SL * 3.2);
+      } else if (clef === "bass") {
+        ctx.font = `${SL * 4.2}px serif`;
+        ctx.textAlign = "left";
+        ctx.fillText("𝄢", MARGIN_LEFT - CLEF_WIDTH + 1, staffTop + SL * 3.2);
       }
 
-      // Key signature — first row only
+      // Key signature (first row only)
       let ksSigWidth = 0;
       if (ks && row === 0) {
         ksSigWidth = drawKeySignature(ctx, MARGIN_LEFT + 10, staffTop, ks, SL);
+        if (isGrandStaff) {
+          drawKeySignature(ctx, MARGIN_LEFT + 10, bassTop, ks, SL);
+        }
       }
 
       // Time signature (first row only)
       let headerEndX = MARGIN_LEFT;
-
       if (row === 0) {
         const [top, bot] = piece.timeSig.split("/");
-
         const tsX = MARGIN_LEFT + ksSigWidth + 20;
 
         ctx.fillStyle = "#1a1510";
         ctx.font = `bold ${SL * 2.4}px "Georgia", serif`;
         ctx.textAlign = "center";
-
         ctx.fillText(top, tsX, staffTop + SL * 1.6);
         ctx.fillText(bot, tsX, staffTop + SL * 3.8);
 
-        // FIX 1: Tighter spacing after time signature (was +18, now +10)
+        if (isGrandStaff) {
+          ctx.fillText(top, tsX, bassTop + SL * 1.6);
+          ctx.fillText(bot, tsX, bassTop + SL * 3.8);
+        }
+
         headerEndX = tsX + 10;
       }
 
-      // Draw each bar
+      // Draw bars
       for (let b = 0; b < rowBars.length; b++) {
         const bar = rowBars[b];
 
-        // FIX 2: Only bar 0 on row 0 gets the header offset.
-        // Continuation rows (row > 0, b === 0) get a small clef clearance offset.
-        // All other bars use MARGIN_LEFT as base so bar 4 stays within staff bounds.
         const barX =
           row === 0 && b === 0
             ? headerEndX + 6
             : row > 0 && b === 0
-              ? MARGIN_LEFT + 14 // small nudge right so notes clear the clef
+              ? MARGIN_LEFT + 14
               : MARGIN_LEFT + b * BAR_WIDTH;
 
         const globalIdx = row * BARS_PER_ROW + b;
         const prevBar = globalIdx > 0 ? bars[globalIdx - 1] : null;
 
-        // Bar line (left edge): skip b===0 every row, suppress lines inside header zone
+        // Bar line spanning both staves if grand staff
         if (b > 0 && barX >= headerEndX) {
           ctx.strokeStyle = "#2a2015";
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(barX, staffTop);
-          ctx.lineTo(barX, staffTop + 4 * SL);
+          ctx.lineTo(barX, isGrandStaff ? bassTop + 4 * SL : staffTop + 4 * SL);
           ctx.stroke();
         }
 
-        // Section label above bar
+        // Section label
         const secColor = SECTION_COLORS[bar.sectionId] || "#888";
         if (!prevBar || prevBar.sectionId !== bar.sectionId) {
           ctx.fillStyle = secColor;
@@ -728,8 +829,9 @@ export default function ScoreRenderer({
           );
         }
 
-        // Notes — pass the bar's right boundary so bar 1 (which starts later) doesn't overflow
         const barRight = MARGIN_LEFT + (b + 1) * BAR_WIDTH;
+
+        // Right hand notes (treble)
         drawBarNotes(
           ctx,
           bar,
@@ -737,36 +839,51 @@ export default function ScoreRenderer({
           barRight,
           staffTop,
           piece.timeSig,
-          clef,
+          "treble",
           SL,
         );
+
+        // Left hand notes (bass) — grand staff only
+        if (isGrandStaff && bar.leftNotes?.length) {
+          drawBarNotes(
+            ctx,
+            { ...bar, notes: bar.leftNotes },
+            barX,
+            barRight,
+            bassTop,
+            piece.timeSig,
+            "bass",
+            SL,
+          );
+        }
       }
 
-      // Final bar line of this row
+      // Final bar line
       const lastX = MARGIN_LEFT + rowBars.length * BAR_WIDTH;
+      const lineBottom = isGrandStaff ? bassTop + 4 * SL : staffTop + 4 * SL;
       ctx.strokeStyle = "#2a2015";
+
       if (row === numRows - 1) {
-        // Double final bar line
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(lastX - 3, staffTop);
-        ctx.lineTo(lastX - 3, staffTop + 4 * SL);
+        ctx.lineTo(lastX - 3, lineBottom);
         ctx.stroke();
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(lastX, staffTop);
-        ctx.lineTo(lastX, staffTop + 4 * SL);
+        ctx.lineTo(lastX, lineBottom);
         ctx.stroke();
         ctx.lineWidth = 1;
       } else {
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(lastX, staffTop);
-        ctx.lineTo(lastX, staffTop + 4 * SL);
+        ctx.lineTo(lastX, lineBottom);
         ctx.stroke();
       }
     }
-  }, [piece, clef]);
+  }, [piece, clef, notation]);
 
   return (
     <canvas
@@ -791,30 +908,23 @@ function drawBarNotes(
 ) {
   const notes = bar.notes || [];
   const totalDur = notes.reduce((s, n) => s + n.duration, 0);
-  // Bar 1 on row 0 has barX shifted right by the header — use less left padding
-  // so notes start earlier and have more spacing room within the bar.
   const isFirstBar = barX > MARGIN_LEFT && barX < MARGIN_LEFT + BAR_WIDTH;
-  // If bar 1's first note has an accidental, give a little extra room for it
+
   const firstNoteHasAccidental = (() => {
     const first = notes[0];
     if (!first || first.rest || first.pitch === "rest") return false;
     const p = parsePitch(first.pitch);
     return p ? p.note.includes("#") || p.note.includes("b") : false;
   })();
+
   const innerLeft = barX + (isFirstBar ? (firstNoteHasAccidental ? 8 : 2) : 10);
-  // Use actual available width so bar 1 (shifted right by header) doesn't overflow
   const drawWidth = barRight - innerLeft - 14;
   let xCursor = innerLeft;
-
-  // Detect quaver runs for beam grouping
-  const beamGroups = groupQuaversForBeaming(notes);
 
   for (let i = 0; i < notes.length; i++) {
     const note = notes[i];
     const noteWidth = (note.duration / Math.max(totalDur, 1)) * drawWidth;
 
-    // If this note has an accidental, shift it right so the accidental
-    // doesn't bleed into the previous note's space
     const parsed =
       !note.rest && note.pitch !== "rest" ? parsePitch(note.pitch) : null;
     const hasAccidental = parsed
@@ -832,14 +942,14 @@ function drawBarNotes(
     if (note.rest || note.pitch === "rest") {
       drawRest(ctx, cx, staffTop, note.duration, sl);
     } else {
-      const parsed = parsePitch(note.pitch);
-      if (parsed) {
-        const staffPos = getStaffPosition(parsed.note, parsed.octave, clef);
+      const p = parsePitch(note.pitch);
+      if (p) {
+        const staffPos = getStaffPosition(p.note, p.octave, clef);
         const noteY = staffTop + 2 * sl - staffPos * (sl / 2);
         const stemUp = noteY > staffTop + 2 * sl;
-        const accidental = parsed.note.includes("#")
+        const accidental = p.note.includes("#")
           ? "♯"
-          : parsed.note.includes("b")
+          : p.note.includes("b")
             ? "♭"
             : null;
         drawNote(
@@ -872,8 +982,6 @@ function drawNote(
   const rw = sl * 0.62;
   const rh = sl * 0.46;
   const filled = duration < 2;
-
-  // Ledger lines above staff
   const topLine = staffTop;
   const bottomLine = staffTop + 4 * sl;
 
@@ -896,7 +1004,6 @@ function drawNote(
     }
   }
 
-  // Note head
   ctx.save();
   ctx.fillStyle = filled ? "#1a1510" : "#faf8f2";
   ctx.strokeStyle = "#1a1510";
@@ -907,7 +1014,6 @@ function drawNote(
   if (!filled) ctx.stroke();
   ctx.restore();
 
-  // Accidental
   if (accidental) {
     ctx.fillStyle = "#1a1510";
     ctx.font = `${sl * 2.2}px serif`;
@@ -915,7 +1021,6 @@ function drawNote(
     ctx.fillText(accidental, x - rw * 2.8, y + rh * 0.8);
   }
 
-  // Stem
   if (duration <= 2) {
     const stemX = stemUp ? x + rw * 0.9 : x - rw * 0.9;
     const stemEnd = stemUp ? y - sl * 3.5 : y + sl * 3.5;
@@ -926,15 +1031,10 @@ function drawNote(
     ctx.lineTo(stemX, stemEnd);
     ctx.stroke();
 
-    // Flags for quavers (0.5) and semiquavers (0.25)
-    if (duration === 0.5) {
-      drawFlag(ctx, stemX, stemEnd, stemUp, sl, 1);
-    } else if (duration === 0.25) {
-      drawFlag(ctx, stemX, stemEnd, stemUp, sl, 2);
-    }
+    if (duration === 0.5) drawFlag(ctx, stemX, stemEnd, stemUp, sl, 1);
+    else if (duration === 0.25) drawFlag(ctx, stemX, stemEnd, stemUp, sl, 2);
   }
 
-  // Dot for dotted notes (1.5, 3)
   if (duration === 1.5 || duration === 3) {
     ctx.fillStyle = "#1a1510";
     ctx.beginPath();
@@ -993,10 +1093,8 @@ function drawRest(
   const mid = staffTop + 2 * sl;
 
   if (duration >= 4) {
-    // Whole rest: filled rectangle hanging from line 2 (from top)
     ctx.fillRect(x - sl * 0.9, staffTop + sl - sl * 0.35, sl * 1.8, sl * 0.55);
   } else if (duration >= 2) {
-    // Half rest: filled rectangle sitting on line 3
     ctx.fillRect(x - sl * 0.9, staffTop + 2 * sl, sl * 1.8, sl * 0.55);
   } else if (duration === 1 || duration === 1.5) {
     ctx.font = `${sl * 2.2}px serif`;
@@ -1022,9 +1120,8 @@ function drawKeySignature(
   ks: { sharps: number; flats: number },
   sl: number,
 ): number {
-  // Staff positions (counting from top line = 0) for sharps: F C G D A E B
-  const sharpStaffPos = [4, 1, 5, 2, 6, 3, 0]; // treble clef
-  const flatStaffPos = [2, 5, 1, 4, 0, 3, 6]; // treble clef
+  const sharpStaffPos = [4, 1, 5, 2, 6, 3, 0];
+  const flatStaffPos = [2, 5, 1, 4, 0, 3, 6];
 
   ctx.fillStyle = "#1a1510";
   ctx.font = `${sl * 2.2}px serif`;
@@ -1043,20 +1140,4 @@ function drawKeySignature(
   }
 
   return width;
-}
-
-// Simple quaver grouping helper (returns groups of indices that should be beamed)
-function groupQuaversForBeaming(notes: Bar["notes"]): number[][] {
-  const groups: number[][] = [];
-  let current: number[] = [];
-  for (let i = 0; i < notes.length; i++) {
-    if (notes[i].duration === 0.5 && !notes[i].rest) {
-      current.push(i);
-    } else {
-      if (current.length >= 2) groups.push(current);
-      current = [];
-    }
-  }
-  if (current.length >= 2) groups.push(current);
-  return groups;
 }

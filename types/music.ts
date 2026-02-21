@@ -10,10 +10,13 @@ export interface MusicNote {
 }
 
 export interface Bar {
-  chord: string; // Roman numeral e.g. "I", "IV", "V7"
-  chordName?: string; // actual chord name e.g. "C major"
+  chord: string;
+  chordName?: string;
   notes: MusicNote[];
+  leftNotes?: MusicNote[]; // 👈 add — left hand for classical notation, absent for lead sheet
 }
+
+export type NotationStyle = "lead-sheet" | "classical"; // 👈 add
 
 export interface Section {
   id: string; // "A", "B", "C"
@@ -48,7 +51,10 @@ export type Genre =
   | "march"
   | "blues"
   | "ragtime"
-  | "baroque";
+  | "baroque"
+  | "rock" // 👈 add
+  | "metal" // 👈 add
+  | "country"; // 👈 add
 
 export type TimeSignature = "4/4" | "3/4" | "6/8" | "2/4" | "auto";
 
@@ -82,4 +88,5 @@ export interface GenerateOptions {
   difficulty: Difficulty;
   genre: Genre;
   structure: StructureType;
+  notation: NotationStyle; // 👈 add
 }
