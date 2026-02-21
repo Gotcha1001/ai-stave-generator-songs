@@ -281,10 +281,6 @@ interface StaffProps {
   bars?: number;
 }
 
-// ─── Beat constants ───────────────────────────────────────────────────────────
-// CRITICAL: must include ALL durations the generator emits.
-// The previous bug was "16" missing → treated as 0 beats → bar overflow.
-
 const DUR_TO_BEATS: Record<string, number> = {
   w: 4,
   h: 2,
@@ -295,29 +291,31 @@ const DUR_TO_BEATS: Record<string, number> = {
 const BEATS_PER_BAR = 4;
 
 // ─── Bar slicer ───────────────────────────────────────────────────────────────
-// Converts a flat NoteType[] into exactly-4-beat bars.
-// Uses float arithmetic with epsilon tolerance for 16th-note precision.
+// Splits a flat NoteType[] into exactly-4-beat bars.
+// Each note is placed into exactly one bar — no note is ever added to two bars.
+// If a note would overflow the current bar it is clipped to the remaining space
+// and the overflow is discarded (the generator guarantees well-formed input).
 
 function splitIntoBars(notes: NoteType[]): NoteType[][] {
   const bars: NoteType[][] = [];
   let current: NoteType[] = [];
-  let acc = 0;
+  let acc = 0; // beats accumulated in the current bar
 
   const bestDur = (beats: number): string => {
-    if (beats >= 4 - 0.01) return "w";
-    if (beats >= 2 - 0.01) return "h";
-    if (beats >= 1 - 0.01) return "q";
-    if (beats >= 0.5 - 0.01) return "8";
+    if (beats >= 4 - 0.001) return "w";
+    if (beats >= 2 - 0.001) return "h";
+    if (beats >= 1 - 0.001) return "q";
+    if (beats >= 0.5 - 0.001) return "8";
     return "16";
   };
 
+  // Close the current bar, padding with rests if needed, then reset state.
   const closebar = () => {
-    // Pad any remaining space to exactly 4 beats
     let rem = BEATS_PER_BAR - acc;
-    while (rem > 0.01) {
+    while (rem > 0.001) {
       const dur = bestDur(rem);
       current.push({ pitch: "rest", duration: dur, isRest: true });
-      rem -= DUR_TO_BEATS[dur];
+      rem -= DUR_TO_BEATS[dur] ?? 1;
     }
     bars.push(current);
     current = [];
@@ -328,39 +326,33 @@ function splitIntoBars(notes: NoteType[]): NoteType[][] {
     const b = DUR_TO_BEATS[note.duration] ?? 1;
     const remaining = BEATS_PER_BAR - acc;
 
-    if (b <= remaining + 0.01) {
-      current.push(note);
+    if (b <= remaining + 0.001) {
+      // Note fits (or is within float epsilon of fitting): add it as-is.
+      current.push({ ...note });
       acc += b;
-      if (acc >= BEATS_PER_BAR - 0.01) closebar();
+      // Close bar only if we've genuinely filled it (use tight epsilon).
+      if (acc >= BEATS_PER_BAR - 0.001) closebar();
     } else {
-      // Note overflows bar — fill rest of bar with a matching-length rest,
-      // then start the next bar with the note (at potentially shorter duration)
-      if (remaining > 0.01) {
-        const fillDur = bestDur(remaining);
-        current.push({ ...note, duration: fillDur });
-        acc += DUR_TO_BEATS[fillDur];
+      // Note overflows: clip it to fill the rest of this bar, close, discard overflow.
+      if (remaining > 0.001) {
+        const fitDur = bestDur(remaining);
+        current.push({ ...note, duration: fitDur });
+        acc += DUR_TO_BEATS[fitDur] ?? remaining;
       }
       closebar();
-
-      // Put remaining duration of the note at the start of next bar
-      const carried =
-        b - DUR_TO_BEATS[bestDur(remaining > 0.01 ? remaining : 0)];
-      if (carried > 0.01) {
-        const carriedDur = bestDur(carried);
-        current.push({ ...note, duration: carriedDur });
-        acc += DUR_TO_BEATS[carriedDur];
-        if (acc >= BEATS_PER_BAR - 0.01) closebar();
-      }
+      // Overflow is intentionally discarded — enforceBeats() in the generator
+      // ensures this never happens with valid input.
     }
   }
 
+  // Flush any trailing notes (pad the last bar with rests).
   if (current.length > 0) closebar();
+
   return bars;
 }
 
 // ─── Pitch helpers ────────────────────────────────────────────────────────────
 
-// Generator emits "C4", "D#4", "Bb3" — VexFlow wants "c/4", "d#/4", "bb/3"
 function pitchToKey(pitch: string): string {
   if (!pitch || pitch === "rest") return "b/4";
   const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
@@ -369,7 +361,6 @@ function pitchToKey(pitch: string): string {
   return `${m[1].toLowerCase()}${acc}/${m[3]}`;
 }
 
-// VexFlow does not auto-render accidentals — we must add them explicitly
 function getAccidental(pitch: string): "#" | "b" | null {
   const m = pitch.match(/^[A-G](#|b)\d$/);
   if (!m) return null;
@@ -377,8 +368,6 @@ function getAccidental(pitch: string): "#" | "b" | null {
 }
 
 // ─── Stem direction ───────────────────────────────────────────────────────────
-// Standard rule: notes on or above the middle line get stem down.
-// Treble middle line = B4, Bass middle line = D3.
 
 function stemDir(pitch: string, clef: "treble" | "bass"): number {
   if (!pitch || pitch === "rest") return Stem.UP;
@@ -422,8 +411,11 @@ function makeNote(note: NoteType, clef: "treble" | "bass"): StaveNote {
 }
 
 // ─── Beam builder ─────────────────────────────────────────────────────────────
-// Groups consecutive beamable notes (8th + 16th) into Beam objects.
-// Handles 16th notes which the old version skipped entirely.
+// Groups consecutive beamable notes (8th, 16th) and creates Beam objects.
+// Must be called BEFORE voice.draw() so stem directions are locked in before
+// VexFlow renders — calling after draw() causes double-stem artifacts.
+// Non-beamable notes have their stem direction explicitly set here too so they
+// don't inherit a stale direction from a neighbouring beam group.
 
 function buildBeams(notes: StaveNote[], direction: number): Beam[] {
   const beams: Beam[] = [];
@@ -433,6 +425,9 @@ function buildBeams(notes: StaveNote[], direction: number): Beam[] {
     if (group.length >= 2) {
       group.forEach((n) => n.setStemDirection(direction));
       beams.push(new Beam(group));
+    } else {
+      // Single beamable note that couldn't form a beam — set direction anyway.
+      group.forEach((n) => n.setStemDirection(direction));
     }
     group = [];
   };
@@ -441,10 +436,16 @@ function buildBeams(notes: StaveNote[], direction: number): Beam[] {
     const beamable =
       (note.getDuration() === "8" || note.getDuration() === "16") &&
       !note.isRest();
-    if (beamable) group.push(note);
-    else flush();
+    if (beamable) {
+      group.push(note);
+    } else {
+      flush();
+      // Non-beamable notes also get an explicit stem direction.
+      if (!note.isRest()) note.setStemDirection(direction);
+    }
   }
   flush();
+
   return beams;
 }
 
@@ -479,7 +480,7 @@ export default function Staff({ right, left }: StaffProps) {
     renderer.resize(canvasW, canvasH);
     const ctx = renderer.getContext();
 
-    const fallbackBar = (clef: "treble" | "bass"): NoteType[] => [
+    const fallbackBar = (): NoteType[] => [
       { pitch: "rest", duration: "w", isRest: true },
     ];
 
@@ -523,12 +524,16 @@ export default function Staff({ right, left }: StaffProps) {
             .draw();
         }
 
-        const rData = rightBars[barIdx] ?? fallbackBar("treble");
-        const lData = leftBars[barIdx] ?? fallbackBar("bass");
+        const rData = rightBars[barIdx] ?? fallbackBar();
+        const lData = leftBars[barIdx] ?? fallbackBar();
         const rNotes = rData.map((n) => makeNote(n, "treble"));
         const lNotes = lData.map((n) => makeNote(n, "bass"));
 
-        // SOFT mode prevents throws on tiny float rounding errors
+        // Build beams BEFORE voice.draw() — prevents double-stem bug.
+        // Also sets stem directions on ALL notes (beamed and unbeamed).
+        const rBeams = buildBeams(rNotes, Stem.UP);
+        const lBeams = buildBeams(lNotes, Stem.DOWN);
+
         const rVoice = new Voice({ numBeats: 4, beatValue: 4 })
           .setMode(Voice.Mode.SOFT)
           .addTickables(rNotes);
@@ -536,7 +541,6 @@ export default function Staff({ right, left }: StaffProps) {
           .setMode(Voice.Mode.SOFT)
           .addTickables(lNotes);
 
-        // Format each hand independently — avoids cross-hand spacing collisions
         const usableW = width - 20;
         new Formatter().joinVoices([rVoice]).format([rVoice], usableW);
         new Formatter().joinVoices([lVoice]).format([lVoice], usableW);
@@ -544,10 +548,8 @@ export default function Staff({ right, left }: StaffProps) {
         rVoice.draw(ctx, treble);
         lVoice.draw(ctx, bass);
 
-        buildBeams(rNotes, Stem.UP).forEach((bm) => bm.setContext(ctx).draw());
-        buildBeams(lNotes, Stem.DOWN).forEach((bm) =>
-          bm.setContext(ctx).draw(),
-        );
+        rBeams.forEach((bm) => bm.setContext(ctx).draw());
+        lBeams.forEach((bm) => bm.setContext(ctx).draw());
       }
     }
   }, [right, left]);

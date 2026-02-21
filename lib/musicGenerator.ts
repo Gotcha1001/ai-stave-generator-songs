@@ -970,8 +970,6 @@ export interface GeneratedSong {
   swing: number;
 }
 
-// ─── PRNG ─────────────────────────────────────────────────────────────────────
-
 function makePrng(seed: number): () => number {
   let s = seed >>> 0;
   return (): number => {
@@ -993,8 +991,6 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const CHROMATIC = [
   "C",
   "C#",
@@ -1009,12 +1005,10 @@ const CHROMATIC = [
   "A#",
   "B",
 ] as const;
-
 const SCALES: Record<string, number[]> = {
   major: [0, 2, 4, 5, 7, 9, 11],
   minor: [0, 2, 3, 5, 7, 8, 10],
 };
-
 const CHORD_DEGREES: Record<string, Record<string, number[]>> = {
   major: {
     I: [0, 2, 4],
@@ -1034,7 +1028,6 @@ const CHORD_DEGREES: Record<string, Record<string, number[]>> = {
     VII: [6, 1, 3],
   },
 };
-
 const HARMONY_GRAPH: Record<string, Record<string, string[]>> = {
   major: {
     I: ["IV", "V", "VI", "II"],
@@ -1054,7 +1047,6 @@ const HARMONY_GRAPH: Record<string, Record<string, string[]>> = {
     VII: ["I", "V"],
   },
 };
-
 const SECTION_PROGRESSIONS: Record<string, Record<string, string[]>> = {
   major: {
     A: ["I", "IV", "V", "I"],
@@ -1069,14 +1061,12 @@ const SECTION_PROGRESSIONS: Record<string, Record<string, string[]>> = {
     Coda: ["IV", "V", "V", "I"],
   },
 };
-
 const SECTION_DYNAMICS: Dynamic[][] = [
   ["mp", "mf"],
   ["mf", "f"],
   ["mp", "mf"],
   ["p", "mp"],
 ];
-
 const DUR_TO_BEATS: Record<string, number> = {
   w: 4,
   h: 2,
@@ -1093,7 +1083,47 @@ const BEATS_TO_DUR: [number, string][] = [
 ];
 const BEATS_PER_BAR = 4;
 
-// ─── Swing ────────────────────────────────────────────────────────────────────
+// Minimum meaningful duration in beats.
+// enforceBeats uses this to guard against floating-point drift causing a phantom
+// note (e.g. a "q" = 1 beat) to be appended when only 0.001 beats remain.
+// Without this guard, bars summed to 5 beats and VexFlow overlapped notes visually.
+const MIN_BEAT = 0.24;
+
+function enforceBeats(
+  notes: NoteType[],
+  targetBeats: number,
+  dyn: Dynamic = "p",
+): NoteType[] {
+  const result: NoteType[] = [];
+  let total = 0;
+  for (const note of notes) {
+    if (total >= targetBeats - 0.01) break;
+    const b = DUR_TO_BEATS[note.duration] ?? 1;
+    const remaining = targetBeats - total;
+    if (b <= remaining + 0.01) {
+      result.push(note);
+      total += Math.min(b, remaining);
+    } else {
+      // Only truncate if there is meaningful space — skip if remaining < MIN_BEAT
+      // to avoid adding a phantom note to an essentially-full bar.
+      if (remaining >= MIN_BEAT) {
+        const fitDur =
+          BEATS_TO_DUR.find(([bv]) => bv <= remaining)?.[1] ?? "16";
+        result.push({ ...note, duration: fitDur });
+        total += DUR_TO_BEATS[fitDur] ?? 0.25;
+      }
+    }
+  }
+  while (total < targetBeats - 0.01) {
+    const rem = targetBeats - total;
+    if (rem < MIN_BEAT) break; // float drift — never add a phantom rest
+    const pair = BEATS_TO_DUR.find(([b]) => b <= rem);
+    const dur = pair ? pair[1] : "16"; // "16" minimum — never "q" as fallback
+    result.push({ pitch: "rest", duration: dur, isRest: true, dynamic: dyn });
+    total += DUR_TO_BEATS[dur] ?? 0.25;
+  }
+  return result;
+}
 
 function applySwing(notes: NoteType[], ratio: number): NoteType[] {
   if (ratio === 0) return notes;
@@ -1110,8 +1140,6 @@ function applySwing(notes: NoteType[], ratio: number): NoteType[] {
     return note;
   });
 }
-
-// ─── Pitch utilities ──────────────────────────────────────────────────────────
 
 function midiToPitch(midi: number): string {
   const oct = Math.floor(midi / 12) - 1;
@@ -1171,8 +1199,6 @@ function walkHarmonyGraph(
   }
   return result;
 }
-
-// ─── Motif pool ───────────────────────────────────────────────────────────────
 
 type MotifNote = { deg: number; dur: string };
 type Motif = MotifNote[];
@@ -1309,8 +1335,6 @@ function generateSeedMotifForSection(
   return pick(scored.filter((s) => s.score === best).map((s) => s.e.motif));
 }
 
-// ─── Motif transforms ─────────────────────────────────────────────────────────
-
 function transposeMotif(m: Motif, s: number): Motif {
   return m.map((n) => ({ ...n, deg: clamp(n.deg + s, 0, 6) }));
 }
@@ -1320,33 +1344,6 @@ function invertMotif(m: Motif): Motif {
 }
 function retrogradeMotif(m: Motif): Motif {
   return [...m].reverse();
-}
-
-function fragmentMotif(motif: Motif): Motif {
-  const call: Motif = [];
-  let beats = 0;
-  for (const n of motif) {
-    const b = DUR_TO_BEATS[n.dur] ?? 1;
-    if (beats + b > BEATS_PER_BAR) break;
-    call.push(n);
-    beats += b;
-  }
-  const response: Motif = [];
-  let rBeats = 0;
-  for (const n of call) {
-    if (rBeats >= BEATS_PER_BAR) break;
-    const halved = Math.max((DUR_TO_BEATS[n.dur] ?? 1) / 2, 0.5);
-    const dur = BEATS_TO_DUR.find(([bv]) => bv <= halved)?.[1] ?? "q";
-    response.push({ deg: clamp(n.deg + 2, 0, 6), dur });
-    rBeats += DUR_TO_BEATS[dur] ?? 1;
-  }
-  while (rBeats < BEATS_PER_BAR) {
-    const rem = BEATS_PER_BAR - rBeats;
-    const [, dur] = BEATS_TO_DUR.find(([b]) => b <= rem) ?? [1, "q"];
-    response.push({ deg: clamp((call[0]?.deg ?? 0) + 1, 0, 6), dur });
-    rBeats += DUR_TO_BEATS[dur] ?? 1;
-  }
-  return [...call, ...response];
 }
 
 function augmentMotif(motif: Motif): Motif {
@@ -1369,45 +1366,25 @@ function diminishMotif(motif: Motif): Motif {
     return { ...n, dur };
   });
 }
-// NOTE: diminish only goes to 8th notes minimum (0.5), never 16th.
-// This avoids 16th notes entirely in motif data, preventing beat-count edge cases.
 
-// ─── Realise ──────────────────────────────────────────────────────────────────
-
-/**
- * KEY RENDERING FIXES applied here:
- *
- * 1. NO anacrusis rests — these were the main cause of bar overflow.
- *    A random 8th rest at phrase start caused total beats to exceed 4
- *    in bars that also got padded, producing collisions.
- *
- * 2. NO ornamental 16th notes — 16th notes in the middle of bars
- *    disrupted beat accounting and caused VexFlow layout collisions.
- *    The music still sounds expressive via passing tones and rests.
- *
- * 3. Phrase-end elongation is capped — last note gets +1 beat only
- *    when there is EXACTLY 1 beat of room, preventing overfill.
- *
- * 4. Padding always fills to exactly totalBeats using epsilon comparison.
- */
 function realise(
   motif: Motif,
   scale: number[],
   chordToneMap: number[][],
   minMidi: number,
   maxMidi: number,
-  isClimax: boolean = false,
-  prevMidi: number = 64,
-  prevDeg: number = 0,
+  isClimax = false,
+  prevMidi = 64,
+  prevDeg = 0,
   dynamic: Dynamic = "mf",
-  phraseBars: number = 2,
+  phraseBars = 2,
 ): { notes: NoteType[]; lastMidi: number; lastDeg: number } {
   const notes: NoteType[] = [];
   const totalBeats = BEATS_PER_BAR * phraseBars;
-  let beats = 0;
-  let last = prevMidi;
-  let lastDeg = prevDeg;
-  let prevLeap = 0;
+  let beats = 0,
+    last = prevMidi,
+    lastDeg = prevDeg,
+    prevLeap = 0;
 
   for (let mi = 0; mi < motif.length; mi++) {
     if (beats >= totalBeats - 0.01) break;
@@ -1415,12 +1392,9 @@ function realise(
     const isLastNote = mi === motif.length - 1;
     const b = DUR_TO_BEATS[m.dur] ?? 1;
     const remaining = totalBeats - beats;
-
-    // Phrase-end elongation: only when there's exactly 1 spare beat
     let actualBeats = Math.min(b, remaining);
-    if (isLastNote && Math.abs(remaining - b - 1) < 0.01 && b < 4) {
+    if (isLastNote && Math.abs(remaining - b - 1) < 0.01 && b < 4)
       actualBeats = b + 1;
-    }
     actualBeats = Math.min(actualBeats, remaining);
     const dur = BEATS_TO_DUR.find(([bv]) => bv <= actualBeats)?.[1] ?? "q";
 
@@ -1432,15 +1406,12 @@ function realise(
     const beatInBar = beats % BEATS_PER_BAR;
     const isStrongBeat = beatInBar < 0.01 || Math.abs(beatInBar - 2) < 0.01;
 
-    // Tension resolution — nudge only, preserves motif shape
     let deg = m.deg;
     if (lastDeg === 6 && rand() < 0.95) deg = 0;
     else if (lastDeg === 3 && rand() < 0.7) deg = 2;
     deg = clamp(deg, 0, 6);
-
     const baseMidi = scale[deg];
 
-    // Weighted octave — Gaussian preference toward center register
     const center = isClimax ? 72 : 64;
     const shifts = [-12, 0, 12, 24];
     const weights = shifts.map((s) => {
@@ -1461,7 +1432,6 @@ function realise(
       }
     }
 
-    // Strong beat: snap to nearest chord tone within 5 semitones
     if (isStrongBeat) {
       const ctones = chordToneMap[barIndex];
       const candidates = ctones
@@ -1475,12 +1445,10 @@ function realise(
         if (Math.abs(nearest - midi) <= 5) midi = nearest;
       }
     } else {
-      // Weak beat: chromatic passing tone ±1 at 25%
       if (rand() < 0.25)
         midi = clamp(midi + (rand() < 0.5 ? 1 : -1), minMidi, maxMidi);
     }
 
-    // Leap limiting — applied after all pitch decisions
     const leap = Math.abs(midi - last);
     if (leap > 9) {
       midi = last + (midi > last ? 2 : -2);
@@ -1492,7 +1460,6 @@ function realise(
     }
     prevLeap = Math.abs(midi - last);
 
-    // Mid-phrase breathing rest: only on weak beats, not last note, not near end
     if (!isStrongBeat && !isLastNote && rand() < 0.07 && remaining > 2.5) {
       notes.push({ pitch: "rest", duration: "q", isRest: true, dynamic });
       beats += 1;
@@ -1505,24 +1472,21 @@ function realise(
     notes.push({ pitch: midiToPitch(midi), duration: dur, dynamic });
   }
 
-  // Tie on last non-rest note at 15%
   const lastIdx = notes.reduce<number>((f, n, i) => (!n.isRest ? i : f), -1);
   if (lastIdx >= 0 && rand() < 0.15)
     notes[lastIdx] = { ...notes[lastIdx], tie: true };
 
-  // Pad to exactly totalBeats
   let total = notes.reduce((s, n) => s + (DUR_TO_BEATS[n.duration] ?? 1), 0);
   while (total < totalBeats - 0.01) {
     const rem = totalBeats - total;
-    const [, dur] = BEATS_TO_DUR.find(([b]) => b <= rem) ?? [1, "q"];
+    if (rem < MIN_BEAT) break;
+    const [, dur] = BEATS_TO_DUR.find(([b]) => b <= rem) ?? [0.25, "16"];
     notes.push({ pitch: "rest", duration: dur, isRest: true, dynamic });
-    total += DUR_TO_BEATS[dur] ?? 1;
+    total += DUR_TO_BEATS[dur] ?? 0.25;
   }
 
   return { notes, lastMidi: last, lastDeg };
 }
-
-// ─── Cadences ─────────────────────────────────────────────────────────────────
 
 function perfectCadence(
   scale: number[],
@@ -1654,31 +1618,30 @@ function cadenceForSection(
   prevMidi: number,
   dyn: Dynamic,
 ): NoteType[] {
-  const tonicC = chordMidi("I", rootIdx, mode, 4);
-  const domC = chordMidi("V", rootIdx, mode, 4);
-  const subdomC = chordMidi("IV", rootIdx, mode, 4);
-  const submedC = chordMidi("VI", rootIdx, mode, 4);
+  const tonicC = chordMidi("I", rootIdx, mode, 4),
+    domC = chordMidi("V", rootIdx, mode, 4);
+  const subdomC = chordMidi("IV", rootIdx, mode, 4),
+    submedC = chordMidi("VI", rootIdx, mode, 4);
+  let raw: NoteType[];
   switch (section) {
     case "Coda":
     case "Ap":
-      return perfectCadence(scale, tonicC, domC, prevMidi, dyn);
+      raw = perfectCadence(scale, tonicC, domC, prevMidi, dyn);
+      break;
     case "B":
-      return rand() < 0.6
-        ? halfCadence(scale, domC, dyn)
-        : deceptiveCadence(scale, submedC, domC, prevMidi, dyn);
+      raw =
+        rand() < 0.6
+          ? halfCadence(scale, domC, dyn)
+          : deceptiveCadence(scale, submedC, domC, prevMidi, dyn);
+      break;
     default:
-      return rand() < 0.7
-        ? perfectCadence(scale, tonicC, domC, prevMidi, dyn)
-        : plagalCadence(scale, tonicC, subdomC, prevMidi, dyn);
+      raw =
+        rand() < 0.7
+          ? perfectCadence(scale, tonicC, domC, prevMidi, dyn)
+          : plagalCadence(scale, tonicC, subdomC, prevMidi, dyn);
   }
+  return enforceBeats(raw, BEATS_PER_BAR * 2, dyn);
 }
-
-// ─── Left hand ────────────────────────────────────────────────────────────────
-//
-// ALL register ranges raised vs previous version:
-//   nearestRoot default: lo=40 (E2→on staff), hi=55 (G3→comfortable bass)
-//   This keeps roots between E2 and G3 — on or near the bass staff lines.
-//   Previously lo=36 (C2) produced 3-ledger-line notes that were unreadable.
 
 function nearestRoot(
   tones: number[],
@@ -1708,10 +1671,9 @@ function albertiBassBar(
   const sorted = [...tones].sort((a, b) => a - b);
   const third = clamp(sorted[1] ?? root + 4, root + 2, root + 9);
   const fifth = clamp(sorted[2] ?? root + 7, root + 4, root + 11);
-  // Clamp all voices to readable bass range: 40–62 (E2–D4)
-  const r = clamp(root, 40, 58);
-  const t = clamp(third, 40, 62);
-  const f = clamp(fifth, 40, 62);
+  const r = clamp(root, 40, 58),
+    t = clamp(third, 40, 62),
+    f = clamp(fifth, 40, 62);
   const pat = variety && rand() < 0.3 ? [r, t, f, t] : [r, f, t, f];
   return {
     notes: pat.map((m) => ({
@@ -1731,7 +1693,6 @@ function blockChordBar(
   const root = nearestRoot(tones, prevRoot, 40, 55);
   const sorted = [...tones].sort((a, b) => a - b);
   const third = clamp(sorted[1] ?? root + 4, root + 2, root + 7);
-  // Simple half+half — no arpeggiation variant to keep bar clean
   return {
     notes: [
       { pitch: midiToPitch(clamp(root, 40, 55)), duration: "h", dynamic: dyn },
@@ -1741,16 +1702,6 @@ function blockChordBar(
   };
 }
 
-/**
- * Broken chord — SIMPLIFIED vs previous version.
- *
- * Old version: 6× eighth notes + 1 quarter = 3.5 + 1 = still 4 beats ✓
- * but 7 notes per bar made VexFlow extremely cramped.
- *
- * New version: 4× quarter notes in an arpeggiated pattern.
- * Visually clean, still sounds like a broken chord texture.
- * Upper note capped at root+12 (one octave) — never goes above bass staff.
- */
 function brokenChordBar(
   tones: number[],
   prevRoot: number,
@@ -1760,7 +1711,7 @@ function brokenChordBar(
   const sorted = [...tones].sort((a, b) => a - b);
   const third = clamp(sorted[1] ?? root + 4, root + 2, root + 7);
   const fifth = clamp(sorted[2] ?? root + 7, root + 4, root + 10);
-  const oct = clamp(root + 12, root + 9, 60); // one octave up, never above D4
+  const oct = clamp(root + 12, root + 9, 60);
   return {
     notes: [
       { pitch: midiToPitch(root), duration: "q", dynamic: dyn },
@@ -1850,8 +1801,6 @@ function pickLHPattern(section: "A" | "B" | "Ap" | "Coda"): LHPattern {
   return patterns[0];
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
 export function generateSimpleSong({
   bars = 16,
   key = pick(["C", "G", "D", "F", "A", "Bb", "E", "Am", "Em", "Dm"]),
@@ -1861,15 +1810,12 @@ export function generateSimpleSong({
   swing = 0,
 }: GeneratorOptions = {}): GeneratedSong {
   rand = seed !== undefined ? makePrng(seed) : Math.random;
-
   const totalBars = Math.max(4, Math.round(bars / 4) * 4);
   const inferredMode: "major" | "minor" =
     mode ?? (/m(in)?$/i.test(key) ? "minor" : rand() < 0.4 ? "minor" : "major");
-
   const rootIdx = rootToMidi(key);
   const intervals = SCALES[inferredMode];
   const scaleOct4 = buildScale(rootIdx, intervals, [4]).slice(0, 7);
-  // Bass scale: octaves 3 only — avoids octave 2 notes (too many ledger lines)
   const scaleBass = buildScale(rootIdx, intervals, [3]);
 
   type SectionId = "A" | "B" | "Ap" | "Coda";
@@ -1888,10 +1834,9 @@ export function generateSimpleSong({
     return prog.map((n) => chordMidi(n, rootIdx, inferredMode, octave));
   }
 
-  // ── Right hand ─────────────────────────────────────────────────────────────
   const rightRaw: NoteType[] = [];
-  let lastMidi = 64;
-  let lastDeg = 0;
+  let lastMidi = 64,
+    lastDeg = 0;
 
   for (let blockIdx = 0; blockIdx < sectionPlan.length; blockIdx++) {
     const id = sectionPlan[blockIdx];
@@ -1902,22 +1847,8 @@ export function generateSimpleSong({
       SECTION_DYNAMICS[Math.min(blockIdx, SECTION_DYNAMICS.length - 1)];
     const chords = sectionChordTones(prog, isClimax ? 5 : 4);
     const [minM, maxM] = isClimax ? [57, 84] : isCoda ? [52, 79] : [52, 79];
-
     const seedMotif = generateSeedMotifForSection(id);
     const motif1 = seedMotif;
-    const motif2: Motif = (() => {
-      switch (id) {
-        case "A":
-          return transposeMotif(seedMotif, 1);
-        case "B":
-          return diminishMotif(transposeMotif(invertMotif(seedMotif), -1));
-        case "Ap":
-          return retrogradeMotif(transposeMotif(seedMotif, 2));
-        case "Coda":
-          return augmentMotif(seedMotif);
-      }
-    })();
-
     const ct1 = [chords[0 % chords.length], chords[1 % chords.length]];
     const r1 = realise(
       motif1,
@@ -1930,11 +1861,10 @@ export function generateSimpleSong({
       lastDeg,
       dynPair[0],
     );
-    rightRaw.push(...r1.notes);
+    const phrase1 = enforceBeats(r1.notes, BEATS_PER_BAR * 2, dynPair[0]);
+    rightRaw.push(...phrase1);
     lastMidi = r1.lastMidi;
     lastDeg = r1.lastDeg;
-
-    // Phrase 2 replaced by cadence
     const cadenceNotes = cadenceForSection(
       id,
       scaleOct4,
@@ -1947,9 +1877,8 @@ export function generateSimpleSong({
     lastMidi = 64;
   }
 
-  // ── Left hand ──────────────────────────────────────────────────────────────
   const leftRaw: NoteType[] = [];
-  let prevRoot = rootIdx + 12 * 3 + 12; // Start around C3 — comfortably on bass staff
+  let prevRoot = rootIdx + 12 * 3 + 12;
 
   for (let blockIdx = 0; blockIdx < sectionPlan.length; blockIdx++) {
     const id = sectionPlan[blockIdx];
@@ -1960,14 +1889,11 @@ export function generateSimpleSong({
     for (let barInBlock = 0; barInBlock < 4; barInBlock++) {
       const numeral = prog[barInBlock % prog.length];
       const nextNumer = prog[(barInBlock + 1) % prog.length];
-      const tones = chordMidi(numeral, rootIdx, inferredMode, 3); // octave 3 for bass
+      const tones = chordMidi(numeral, rootIdx, inferredMode, 3);
       const nextTones = chordMidi(nextNumer, rootIdx, inferredMode, 3);
       const dyn = dynPair[barInBlock < 2 ? 0 : 1];
-
-      // Tonic downbeat: simple octave — root + root+12, no higher
       const isTonicDownbeat =
         numeral === "I" && barInBlock === 0 && (id === "A" || id === "Coda");
-
       let result: { notes: NoteType[]; lastRoot: number };
 
       if (isTonicDownbeat) {
@@ -2005,20 +1931,21 @@ export function generateSimpleSong({
           case "pedal":
             result = pedalPointBar(tones, prevRoot, dyn);
             break;
+          default:
+            result = albertiBassBar(tones, prevRoot, false, dyn);
         }
       }
 
-      leftRaw.push(...result.notes);
+      // Enforce exactly 1 bar per LH bar — MIN_BEAT guard prevents phantom notes
+      const barNotes = enforceBeats(result.notes, BEATS_PER_BAR, dyn);
+      leftRaw.push(...barNotes);
       prevRoot = result.lastRoot;
     }
   }
 
-  const right = applySwing(rightRaw, swing);
-  const left = applySwing(leftRaw, swing);
-
   return {
-    right,
-    left,
+    right: applySwing(rightRaw, swing),
+    left: applySwing(leftRaw, swing),
     bars: totalBars,
     key,
     mode: inferredMode,
