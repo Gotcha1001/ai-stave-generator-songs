@@ -256,7 +256,6 @@ import { useEffect, useRef } from "react";
 import {
   Renderer,
   Stave,
-  StaveNote,
   Stem,
   Formatter,
   StaveConnector,
@@ -264,7 +263,9 @@ import {
   Barline,
   Beam,
   Accidental,
+  Fraction,
 } from "vexflow";
+import { RenderContext, StaveNote, StaveTie } from "vexflow";
 
 export interface NoteType {
   pitch: string;
@@ -272,6 +273,7 @@ export interface NoteType {
   isRest?: boolean;
   dynamic?: string;
   tie?: boolean;
+  tieId?: string;
   swingOffset?: number;
 }
 
@@ -281,41 +283,78 @@ interface StaffProps {
   bars?: number;
 }
 
-const DUR_TO_BEATS: Record<string, number> = {
-  w: 4,
-  h: 2,
-  q: 1,
-  "8": 0.5,
-  "16": 0.25,
+const TICKS_PER_BAR = 400;
+
+const DUR_TO_TICKS: Record<string, number> = {
+  w: 400,
+  h: 200,
+  q: 100,
+  "8": 50,
+  "16": 25,
 };
-const BEATS_PER_BAR = 4;
 
-// ─── Bar slicer ───────────────────────────────────────────────────────────────
-// Splits a flat NoteType[] into exactly-4-beat bars.
-// Each note is placed into exactly one bar — no note is ever added to two bars.
-// If a note would overflow the current bar it is clipped to the remaining space
-// and the overflow is discarded (the generator guarantees well-formed input).
+const VALID_DURATIONS = new Set(["w", "h", "q", "8", "16"]);
 
-function splitIntoBars(notes: NoteType[]): NoteType[][] {
+// How much space the clef + time signature consume inside the first bar.
+// Subtract this from the formatter width so notes don't drift into that area.
+const CLEF_TIMESIG_OVERHEAD = 80;
+
+function calcStemDir(pitch: string, clef: "treble" | "bass"): number {
+  if (!pitch || pitch === "rest") return Stem.UP;
+  const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
+  if (!m) return Stem.UP;
+  const order = ["C", "D", "E", "F", "G", "A", "B"];
+  const pos = parseInt(m[3]) * 7 + order.indexOf(m[1]);
+  const mid = clef === "treble" ? 34 : 22;
+  return pos >= mid ? Stem.DOWN : Stem.UP;
+}
+
+function clampPitch(pitch: string, clef: "treble" | "bass"): string {
+  if (!pitch || pitch === "rest") return pitch;
+  const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
+  if (!m) return pitch;
+  const note = m[1];
+  const acc = m[2] ?? "";
+  let octave = parseInt(m[3]);
+  if (clef === "treble") {
+    if (octave < 4) octave = 4;
+    if (octave > 6) octave = 6;
+  } else {
+    if (octave < 2) octave = 2;
+    if (octave > 4) octave = 4;
+  }
+  return `${note}${acc}${octave}`;
+}
+
+function bestDur(ticks: number): string {
+  if (ticks >= 400) return "w";
+  if (ticks >= 200) return "h";
+  if (ticks >= 100) return "q";
+  if (ticks >= 50) return "8";
+  return "16";
+}
+
+function sanitizeNote(note: NoteType): NoteType {
+  const dur = VALID_DURATIONS.has(note.duration) ? note.duration : "q";
+  const isRest =
+    note.isRest || !note.pitch || note.pitch === "rest" || note.pitch === "";
+  return { ...note, duration: dur, isRest };
+}
+
+function splitIntoBars(rawNotes: NoteType[]): NoteType[][] {
+  const notes = rawNotes.map(sanitizeNote);
   const bars: NoteType[][] = [];
   let current: NoteType[] = [];
-  let acc = 0; // beats accumulated in the current bar
+  let acc = 0;
 
-  const bestDur = (beats: number): string => {
-    if (beats >= 4 - 0.001) return "w";
-    if (beats >= 2 - 0.001) return "h";
-    if (beats >= 1 - 0.001) return "q";
-    if (beats >= 0.5 - 0.001) return "8";
-    return "16";
-  };
-
-  // Close the current bar, padding with rests if needed, then reset state.
   const closebar = () => {
-    let rem = BEATS_PER_BAR - acc;
-    while (rem > 0.001) {
+    let rem = TICKS_PER_BAR - acc;
+    while (rem > 0) {
       const dur = bestDur(rem);
+      const durTicks = DUR_TO_TICKS[dur] ?? 0;
+      if (durTicks <= 0) break;
       current.push({ pitch: "rest", duration: dur, isRest: true });
-      rem -= DUR_TO_BEATS[dur] ?? 1;
+      rem -= durTicks;
     }
     bars.push(current);
     current = [];
@@ -323,42 +362,59 @@ function splitIntoBars(notes: NoteType[]): NoteType[][] {
   };
 
   for (const note of notes) {
-    const b = DUR_TO_BEATS[note.duration] ?? 1;
-    const remaining = BEATS_PER_BAR - acc;
+    const ticks = DUR_TO_TICKS[note.duration] ?? 100;
+    const remaining = TICKS_PER_BAR - acc;
 
-    if (b <= remaining + 0.001) {
-      // Note fits (or is within float epsilon of fitting): add it as-is.
+    if (ticks <= remaining) {
       current.push({ ...note });
-      acc += b;
-      // Close bar only if we've genuinely filled it (use tight epsilon).
-      if (acc >= BEATS_PER_BAR - 0.001) closebar();
+      acc += ticks;
+      if (acc >= TICKS_PER_BAR) closebar();
     } else {
-      // Note overflows: clip it to fill the rest of this bar, close, discard overflow.
-      if (remaining > 0.001) {
-        const fitDur = bestDur(remaining);
-        current.push({ ...note, duration: fitDur });
-        acc += DUR_TO_BEATS[fitDur] ?? remaining;
-      }
+      // Note does not fit — fill rest of current bar completely, then start fresh.
+      // Use closebar() directly: it pads with rests until acc reaches TICKS_PER_BAR.
       closebar();
-      // Overflow is intentionally discarded — enforceBeats() in the generator
-      // ensures this never happens with valid input.
+
+      // Now place the note at the start of the new bar.
+      // A whole note (w = 400) exactly fills one bar — safe.
+      // Any shorter note just accumulates normally.
+      current.push({ ...note });
+      acc += ticks;
+      if (acc >= TICKS_PER_BAR) closebar();
     }
   }
 
-  // Flush any trailing notes (pad the last bar with rests).
   if (current.length > 0) closebar();
 
-  return bars;
+  // Nuclear guard: every bar must be exactly TICKS_PER_BAR with no duplicate positions
+  return bars.map((bar, i) => {
+    const total = bar.reduce((s, n) => s + (DUR_TO_TICKS[n.duration] ?? 0), 0);
+    if (total !== TICKS_PER_BAR) {
+      console.error(
+        `Staff bar ${i} has ${total} ticks (expected ${TICKS_PER_BAR})`,
+      );
+      return [{ pitch: "rest", duration: "w", isRest: true }];
+    }
+    const positions: number[] = [];
+    let t = 0;
+    for (const n of bar) {
+      positions.push(t);
+      t += DUR_TO_TICKS[n.duration] ?? 0;
+    }
+    if (new Set(positions).size !== positions.length) {
+      console.error(
+        `Staff bar ${i} has duplicate tick positions — replacing with whole rest`,
+      );
+      return [{ pitch: "rest", duration: "w", isRest: true }];
+    }
+    return bar;
+  });
 }
-
-// ─── Pitch helpers ────────────────────────────────────────────────────────────
 
 function pitchToKey(pitch: string): string {
   if (!pitch || pitch === "rest") return "b/4";
   const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
   if (!m) return "b/4";
-  const acc = m[2] ?? "";
-  return `${m[1].toLowerCase()}${acc}/${m[3]}`;
+  return `${m[1].toLowerCase()}${m[2] ?? ""}/${m[3]}`;
 }
 
 function getAccidental(pitch: string): "#" | "b" | null {
@@ -367,26 +423,9 @@ function getAccidental(pitch: string): "#" | "b" | null {
   return m[1] as "#" | "b";
 }
 
-// ─── Stem direction ───────────────────────────────────────────────────────────
-
-function stemDir(pitch: string, clef: "treble" | "bass"): number {
-  if (!pitch || pitch === "rest") return Stem.UP;
-  const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
-  if (!m) return Stem.UP;
-  const order = ["C", "D", "E", "F", "G", "A", "B"];
-  const pos = parseInt(m[3]) * 7 + order.indexOf(m[1]);
-  const mid =
-    clef === "treble"
-      ? 4 * 7 + order.indexOf("B") // B4 = 34
-      : 3 * 7 + order.indexOf("D"); // D3 = 22
-  return pos >= mid ? Stem.DOWN : Stem.UP;
-}
-
-// ─── StaveNote factory ────────────────────────────────────────────────────────
-
 function makeNote(note: NoteType, clef: "treble" | "bass"): StaveNote {
   const restKey = clef === "treble" ? "b/4" : "d/3";
-  const isRest = note.isRest || note.pitch === "rest";
+  const isRest = note.isRest || note.pitch === "rest" || !note.pitch;
 
   if (isRest) {
     return new StaveNote({
@@ -396,60 +435,40 @@ function makeNote(note: NoteType, clef: "treble" | "bass"): StaveNote {
     });
   }
 
-  const key = pitchToKey(note.pitch);
+  const safePitch = clampPitch(note.pitch, clef);
+  const key = pitchToKey(safePitch);
+  const stemDirection = calcStemDir(safePitch, clef);
   const sn = new StaveNote({
     clef,
     keys: [key],
     duration: note.duration,
-    stemDirection: stemDir(note.pitch, clef),
+    stemDirection,
   });
-
-  const acc = getAccidental(note.pitch);
+  const acc = getAccidental(safePitch);
   if (acc) sn.addModifier(new Accidental(acc), 0);
-
   return sn;
 }
 
-// ─── Beam builder ─────────────────────────────────────────────────────────────
-// Groups consecutive beamable notes (8th, 16th) and creates Beam objects.
-// Must be called BEFORE voice.draw() so stem directions are locked in before
-// VexFlow renders — calling after draw() causes double-stem artifacts.
-// Non-beamable notes have their stem direction explicitly set here too so they
-// don't inherit a stale direction from a neighbouring beam group.
-
-function buildBeams(notes: StaveNote[], direction: number): Beam[] {
-  const beams: Beam[] = [];
-  let group: StaveNote[] = [];
-
-  const flush = () => {
-    if (group.length >= 2) {
-      group.forEach((n) => n.setStemDirection(direction));
-      beams.push(new Beam(group));
-    } else {
-      // Single beamable note that couldn't form a beam — set direction anyway.
-      group.forEach((n) => n.setStemDirection(direction));
-    }
-    group = [];
-  };
-
-  for (const note of notes) {
-    const beamable =
-      (note.getDuration() === "8" || note.getDuration() === "16") &&
-      !note.isRest();
-    if (beamable) {
-      group.push(note);
-    } else {
-      flush();
-      // Non-beamable notes also get an explicit stem direction.
-      if (!note.isRest()) note.setStemDirection(direction);
-    }
-  }
-  flush();
-
-  return beams;
+function buildBeams(notes: StaveNote[]): Beam[] {
+  return Beam.generateBeams(notes, { groups: [new Fraction(2, 8)] });
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+function drawTies(ctx: RenderContext, notes: StaveNote[], data: NoteType[]) {
+  for (let i = 0; i < data.length - 1; i++) {
+    const cur = data[i];
+    const next = data[i + 1];
+    if (cur.tie && next.tie && cur.tieId && cur.tieId === next.tieId) {
+      new StaveTie({
+        firstNote: notes[i],
+        lastNote: notes[i + 1],
+        firstIndexes: [0],
+        lastIndexes: [0],
+      })
+        .setContext(ctx)
+        .draw();
+    }
+  }
+}
 
 export default function Staff({ right, left }: StaffProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -466,8 +485,8 @@ export default function Staff({ right, left }: StaffProps) {
 
     const BARS_PER_ROW = 4;
     const LEFT_MARGIN = 16;
-    const CLEF_WIDTH = 80;
-    const BAR_WIDTH = 210;
+    const CLEF_WIDTH = 80; // extra width added to the first stave in each row
+    const BAR_WIDTH = 240; // note-area width — wider to give accidentals room
     const TREBLE_Y = 20;
     const BASS_Y = 160;
     const ROW_HEIGHT = 280;
@@ -484,6 +503,24 @@ export default function Staff({ right, left }: StaffProps) {
       { pitch: "rest", duration: "w", isRest: true },
     ];
 
+    const safeBar = (
+      bar: NoteType[],
+      hand: string,
+      idx: number,
+    ): NoteType[] => {
+      let t = 0;
+      const seen = new Set<number>();
+      for (const n of bar) {
+        if (seen.has(t)) {
+          console.error(`${hand} bar ${idx}: duplicate at tick ${t}`);
+          return [{ pitch: "rest", duration: "w", isRest: true }];
+        }
+        seen.add(t);
+        t += DUR_TO_TICKS[n.duration] ?? 0;
+      }
+      return bar;
+    };
+
     for (let row = 0; row < totalRows; row++) {
       const rowY = row * ROW_HEIGHT;
       const barsInRow = Math.min(BARS_PER_ROW, totalBars - row * BARS_PER_ROW);
@@ -493,13 +530,16 @@ export default function Staff({ right, left }: StaffProps) {
         const isFirstInRow = b === 0;
         const isLastBar = barIdx === totalBars - 1;
 
-        const x = isFirstInRow
+        // ── Stave geometry ──────────────────────────────────────────────────
+        // First bar in a row is wider to accommodate clef + time signature.
+        // BAR_WIDTH is always the pure note-area width.
+        const staveX = isFirstInRow
           ? LEFT_MARGIN
           : LEFT_MARGIN + CLEF_WIDTH + b * BAR_WIDTH;
-        const width = isFirstInRow ? CLEF_WIDTH + BAR_WIDTH : BAR_WIDTH;
+        const staveWidth = isFirstInRow ? CLEF_WIDTH + BAR_WIDTH : BAR_WIDTH;
 
-        const treble = new Stave(x, rowY + TREBLE_Y, width);
-        const bass = new Stave(x, rowY + BASS_Y, width);
+        const treble = new Stave(staveX, rowY + TREBLE_Y, staveWidth);
+        const bass = new Stave(staveX, rowY + BASS_Y, staveWidth);
 
         if (isFirstInRow) {
           treble.addClef("treble").addTimeSignature("4/4");
@@ -524,15 +564,31 @@ export default function Staff({ right, left }: StaffProps) {
             .draw();
         }
 
-        const rData = rightBars[barIdx] ?? fallbackBar();
-        const lData = leftBars[barIdx] ?? fallbackBar();
+        // ── Formatter width ─────────────────────────────────────────────────
+        // THIS is the key fix: the formatter must only see the note-area width,
+        // not the full stave width. For the first bar, the clef + time signature
+        // already occupy CLEF_TIMESIG_OVERHEAD px inside the stave, so we
+        // subtract that. For all other bars, it's just BAR_WIDTH minus a small margin.
+        const formatterW = isFirstInRow
+          ? BAR_WIDTH - CLEF_TIMESIG_OVERHEAD
+          : BAR_WIDTH - 10;
+
+        const rData = safeBar(
+          rightBars[barIdx] ?? fallbackBar(),
+          "treble",
+          barIdx,
+        );
+        const lData = safeBar(
+          leftBars[barIdx] ?? fallbackBar(),
+          "bass",
+          barIdx,
+        );
+
         const rNotes = rData.map((n) => makeNote(n, "treble"));
         const lNotes = lData.map((n) => makeNote(n, "bass"));
 
-        // Build beams BEFORE voice.draw() — prevents double-stem bug.
-        // Also sets stem directions on ALL notes (beamed and unbeamed).
-        const rBeams = buildBeams(rNotes, Stem.UP);
-        const lBeams = buildBeams(lNotes, Stem.DOWN);
+        const rBeams = buildBeams(rNotes);
+        const lBeams = buildBeams(lNotes);
 
         const rVoice = new Voice({ numBeats: 4, beatValue: 4 })
           .setMode(Voice.Mode.SOFT)
@@ -541,12 +597,18 @@ export default function Staff({ right, left }: StaffProps) {
           .setMode(Voice.Mode.SOFT)
           .addTickables(lNotes);
 
-        const usableW = width - 20;
-        new Formatter().joinVoices([rVoice]).format([rVoice], usableW);
-        new Formatter().joinVoices([lVoice]).format([lVoice], usableW);
+        // Format both voices together — VexFlow resolves accidental collisions
+        // and adds horizontal padding automatically when voices share a formatter.
+        new Formatter()
+          .joinVoices([rVoice])
+          .joinVoices([lVoice])
+          .format([rVoice, lVoice], formatterW, { alignRests: true });
 
         rVoice.draw(ctx, treble);
         lVoice.draw(ctx, bass);
+
+        drawTies(ctx, rNotes, rData);
+        drawTies(ctx, lNotes, lData);
 
         rBeams.forEach((bm) => bm.setContext(ctx).draw());
         lBeams.forEach((bm) => bm.setContext(ctx).draw());
