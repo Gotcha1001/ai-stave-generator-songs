@@ -331,7 +331,9 @@ export default function StudioPage() {
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-200 p-10 space-y-6">
-      <h1 className="text-3xl font-bold text-amber-400">🎼 AI Studio</h1>
+      <h1 className="text-3xl font-bold text-amber-400">
+        🎼 Random Piece Studio
+      </h1>
 
       {/* Controls row */}
       <div className="flex flex-wrap items-center gap-4">
