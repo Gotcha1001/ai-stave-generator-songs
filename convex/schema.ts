@@ -80,7 +80,6 @@ export default defineSchema({
     structure: v.array(v.string()),
     description: v.optional(v.string()),
     notation: v.optional(
-      // 👈 add this
       v.union(v.literal("lead-sheet"), v.literal("classical")),
     ),
     sections: v.array(
@@ -101,7 +100,6 @@ export default defineSchema({
             ),
             leftNotes: v.optional(
               v.array(
-                // 👈 add this
                 v.object({
                   pitch: v.string(),
                   duration: v.union(v.string(), v.number()),
@@ -123,6 +121,7 @@ export default defineSchema({
     prompt: v.string(),
     key: v.string(),
     tempo: v.number(),
+    timeSig: v.optional(v.string()), // ← ADDED (optional so existing docs don't break)
     rightHand: v.array(v.object({ pitch: v.string(), duration: v.string() })),
     leftHand: v.array(v.object({ pitch: v.string(), duration: v.string() })),
     createdAt: v.number(),

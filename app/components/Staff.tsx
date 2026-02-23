@@ -1,255 +1,3 @@
-// "use client";
-
-// import { useEffect, useRef } from "react";
-// import {
-//   Renderer,
-//   Stave,
-//   StaveNote,
-//   Stem,
-//   Formatter,
-//   StaveConnector,
-//   Voice,
-//   Barline,
-//   Beam,
-// } from "vexflow";
-
-// export interface NoteType {
-//   pitch: string;
-//   duration: string;
-//   isRest?: boolean;
-// }
-
-// interface StaffProps {
-//   right: NoteType[];
-//   left: NoteType[];
-//   bars?: number;
-// }
-
-// const TICKS: Record<string, number> = { w: 16, h: 8, q: 4, "8": 2 };
-
-// function splitIntoBars(notes: NoteType[]): NoteType[][] {
-//   const bars: NoteType[][] = [];
-//   let bar: NoteType[] = [];
-//   let ticks = 0;
-//   for (const note of notes) {
-//     bar.push(note);
-//     ticks += TICKS[note.duration] ?? 4;
-//     if (ticks >= 16) {
-//       bars.push(bar);
-//       bar = [];
-//       ticks = 0;
-//     }
-//   }
-//   if (bar.length) bars.push(bar);
-//   return bars;
-// }
-
-// /**
-//  * Convert generator pitch "C4" → VexFlow key "c/4".
-//  * Also clamps the octave to a range that sits on or near the staff:
-//  *   treble: octave 4–5  (C4–B5)
-//  *   bass:   octave 2–4  (C2–B4, but prefer 3–4 for on-staff notes)
-//  */
-// function pitchToKey(pitch: string, clef: "treble" | "bass"): string {
-//   const m = pitch.match(/^([A-G]#?)(\d)$/);
-//   if (!m) return clef === "treble" ? "b/4" : "d/3";
-
-//   const note = m[1].toLowerCase();
-//   let oct = parseInt(m[2]);
-
-//   if (clef === "treble") {
-//     // Treble staff sits on E4–F5; clamp to 4–5
-//     oct = Math.max(4, Math.min(5, oct));
-//   } else {
-//     // Bass staff sits on G2–A3; clamp to 2–4 but nudge up if too low
-//     oct = Math.max(2, Math.min(4, oct));
-//     // Anything in octave 2 is below the staff — push to 3
-//     if (oct < 3) oct = 3;
-//   }
-
-//   return `${note}/${oct}`;
-// }
-
-// /**
-//  * Stem direction by middle-line rule.
-//  * Treble: B4 = middle line → notes on or above get stem down.
-//  * Bass:   D3 = middle line → notes on or above get stem down.
-//  */
-// function stemDir(key: string, clef: "treble" | "bass"): number {
-//   const m = key.match(/^([a-g]#?)\/(\d)$/);
-//   if (!m) return Stem.UP;
-//   const noteOrder = ["c", "d", "e", "f", "g", "a", "b"];
-//   const n = noteOrder.indexOf(m[1].replace("#", ""));
-//   const oct = parseInt(m[2]);
-//   // Convert to a simple comparable number: oct*7 + noteIndex
-//   const pos = oct * 7 + n;
-//   const middleTreble = 4 * 7 + noteOrder.indexOf("b"); // B4
-//   const middleBass = 3 * 7 + noteOrder.indexOf("d"); // D3
-//   const middle = clef === "treble" ? middleTreble : middleBass;
-//   return pos >= middle ? Stem.DOWN : Stem.UP;
-// }
-
-// export default function Staff({ right, left }: StaffProps) {
-//   const ref = useRef<HTMLDivElement>(null);
-
-//   useEffect(() => {
-//     if (!ref.current) return;
-//     ref.current.innerHTML = "";
-//     if (!right.length && !left.length) return;
-
-//     const rightBars = splitIntoBars(right);
-//     const leftBars = splitIntoBars(left);
-//     const totalBars = Math.min(rightBars.length, leftBars.length);
-//     if (totalBars === 0) return;
-
-//     const BARS_PER_ROW = 4;
-//     const LEFT_MARGIN = 16;
-//     const CLEF_EXTRA = 80;
-//     const BAR_WIDTH = 200;
-//     const RIGHT_MARGIN = 20;
-//     const TREBLE_Y_OFF = 20;
-//     const BASS_Y_OFF = 160;
-//     const ROW_HEIGHT = 270;
-
-//     const totalRows = Math.ceil(totalBars / BARS_PER_ROW);
-//     const CANVAS_W =
-//       LEFT_MARGIN + CLEF_EXTRA + BARS_PER_ROW * BAR_WIDTH + RIGHT_MARGIN;
-//     const CANVAS_H = totalRows * ROW_HEIGHT + 20;
-
-//     const renderer = new Renderer(ref.current, Renderer.Backends.SVG);
-//     renderer.resize(CANVAS_W, CANVAS_H);
-//     const ctx = renderer.getContext();
-
-//     function makeNote(note: NoteType, clef: "treble" | "bass"): StaveNote {
-//       const restKey = clef === "treble" ? "b/4" : "d/3";
-
-//       if (note.isRest || note.pitch === "rest") {
-//         return new StaveNote({
-//           clef,
-//           keys: [restKey],
-//           duration: note.duration + "r",
-//         });
-//       }
-
-//       const key = pitchToKey(note.pitch, clef);
-//       const sd = stemDir(key, clef);
-
-//       return new StaveNote({
-//         clef,
-//         keys: [key],
-//         duration: note.duration,
-//         stemDirection: sd,
-//         // auto_stem: false so our stemDirection is always respected
-//       });
-//     }
-
-//     for (let row = 0; row < totalRows; row++) {
-//       const rowY = row * ROW_HEIGHT;
-//       const yTreble = rowY + TREBLE_Y_OFF;
-//       const yBass = rowY + BASS_Y_OFF;
-//       const barsInRow = Math.min(BARS_PER_ROW, totalBars - row * BARS_PER_ROW);
-
-//       for (let b = 0; b < barsInRow; b++) {
-//         const barIndex = row * BARS_PER_ROW + b;
-//         const isFirstInRow = b === 0;
-//         const isLastBar = barIndex === totalBars - 1;
-
-//         const x = isFirstInRow
-//           ? LEFT_MARGIN
-//           : LEFT_MARGIN + CLEF_EXTRA + b * BAR_WIDTH;
-//         const width = isFirstInRow ? CLEF_EXTRA + BAR_WIDTH : BAR_WIDTH;
-
-//         const treble = new Stave(x, yTreble, width);
-//         const bass = new Stave(x, yBass, width);
-
-//         if (isFirstInRow) {
-//           treble.addClef("treble").addTimeSignature("4/4");
-//           bass.addClef("bass").addTimeSignature("4/4");
-//         }
-//         if (isLastBar) {
-//           treble.setEndBarType(Barline.type.END);
-//           bass.setEndBarType(Barline.type.END);
-//         }
-
-//         treble.setContext(ctx).draw();
-//         bass.setContext(ctx).draw();
-
-//         if (isFirstInRow) {
-//           new StaveConnector(treble, bass)
-//             .setType("brace")
-//             .setContext(ctx)
-//             .draw();
-//           new StaveConnector(treble, bass)
-//             .setType("singleLeft")
-//             .setContext(ctx)
-//             .draw();
-//         }
-
-//         const rNotes = rightBars[barIndex].map((n) => makeNote(n, "treble"));
-//         const lNotes = leftBars[barIndex].map((n) => makeNote(n, "bass"));
-
-//         const rVoice = new Voice({ numBeats: 4, beatValue: 4 })
-//           .setMode(Voice.Mode.SOFT) // SOFT so minor tick mismatches don't throw
-//           .addTickables(rNotes);
-//         const lVoice = new Voice({ numBeats: 4, beatValue: 4 })
-//           .setMode(Voice.Mode.SOFT)
-//           .addTickables(lNotes);
-
-//         const usableWidth = width - 30;
-//         new Formatter().joinVoices([rVoice]).format([rVoice], usableWidth);
-//         new Formatter().joinVoices([lVoice]).format([lVoice], usableWidth);
-
-//         // Beam only eighth notes — non-eighth notes already have correct stems
-//         // from stemDirection set in makeNote(). Don't use applyAndGetBeams as
-//         // it overrides ALL stem directions, breaking non-beamed notes.
-//         const rBeams = buildBeams(rNotes, Stem.UP);
-//         const lBeams = buildBeams(lNotes, Stem.DOWN);
-
-//         rVoice.draw(ctx, treble);
-//         lVoice.draw(ctx, bass);
-
-//         rBeams.forEach((bm) => bm.setContext(ctx).draw());
-//         lBeams.forEach((bm) => bm.setContext(ctx).draw());
-//       }
-//     }
-//   }, [right, left]);
-
-//   return <div ref={ref} className="overflow-x-auto" />;
-// }
-
-// /**
-//  * Build Beam objects only for consecutive eighth note groups.
-//  * Non-eighth notes are skipped — their stems are already correct from stemDirection.
-//  * This avoids the pitfall of Beam.applyAndGetBeams() which resets ALL stem directions.
-//  */
-// function buildBeams(notes: StaveNote[], direction: number): Beam[] {
-//   const beams: Beam[] = [];
-//   let group: StaveNote[] = [];
-
-//   const flush = () => {
-//     if (group.length >= 2) {
-//       // Set consistent stem direction on the whole group before beaming
-//       group.forEach((n) => n.setStemDirection(direction));
-//       beams.push(new Beam(group));
-//     } else if (group.length === 1) {
-//       // Single eighth note — keep its own stem direction, no beam needed
-//     }
-//     group = [];
-//   };
-
-//   for (const note of notes) {
-//     // getDuration() returns "8" for eighth notes
-//     if (note.getDuration() === "8" && !note.isRest()) {
-//       group.push(note);
-//     } else {
-//       flush();
-//     }
-//   }
-//   flush();
-
-//   return beams;
-// }
-
 "use client";
 
 import { useEffect, useRef } from "react";
@@ -281,6 +29,7 @@ interface StaffProps {
   right: NoteType[];
   left: NoteType[];
   bars?: number;
+  currentBeat?: number;
 }
 
 const TICKS_PER_BAR = 400;
@@ -470,8 +219,9 @@ function drawTies(ctx: RenderContext, notes: StaveNote[], data: NoteType[]) {
   }
 }
 
-export default function Staff({ right, left }: StaffProps) {
+export default function Staff({ right, left, currentBeat }: StaffProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -616,5 +366,78 @@ export default function Staff({ right, left }: StaffProps) {
     }
   }, [right, left]);
 
-  return <div ref={ref} className="overflow-x-auto" />;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = ref.current;
+    if (!canvas || !container) return;
+
+    const svg = container.querySelector("svg");
+    if (!svg) return;
+
+    const w = parseInt(svg.getAttribute("width") ?? "0");
+    const h = parseInt(svg.getAttribute("height") ?? "0");
+    if (!w || !h) return;
+
+    canvas.width = w;
+    canvas.height = h;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    if (!currentBeat || currentBeat <= 0) return;
+
+    // Must match the constants in the VexFlow useEffect above
+    const BARS_PER_ROW = 4;
+    const LEFT_MARGIN = 16;
+    const CLEF_WIDTH = 80;
+    const BAR_WIDTH = 240;
+    const TREBLE_Y = 20;
+    const BASS_Y = 160;
+    const ROW_HEIGHT = 280;
+    const STAVE_HEIGHT = 80;
+
+    const beatsPerBar = 4;
+    const totalBar = Math.floor(currentBeat / beatsPerBar);
+    const beatInBar = currentBeat % beatsPerBar;
+
+    const row = Math.floor(totalBar / BARS_PER_ROW);
+    const col = totalBar % BARS_PER_ROW;
+
+    // X position of note area start for this bar
+    const noteAreaX =
+      col === 0
+        ? LEFT_MARGIN + CLEF_WIDTH
+        : LEFT_MARGIN + CLEF_WIDTH + col * BAR_WIDTH;
+
+    const x = noteAreaX + (beatInBar / beatsPerBar) * BAR_WIDTH;
+    const rowY = row * ROW_HEIGHT;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(251, 146, 60, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.shadowColor = "rgba(251, 146, 60, 0.5)";
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(x, rowY + TREBLE_Y);
+    ctx.lineTo(x, rowY + BASS_Y + STAVE_HEIGHT);
+    ctx.stroke();
+    ctx.restore();
+  }, [currentBeat]);
+
+  // Replace the existing return with:
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <div ref={ref} className="overflow-x-auto" />
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          pointerEvents: "none", // clicks pass through to anything below
+        }}
+      />
+    </div>
+  );
 }
