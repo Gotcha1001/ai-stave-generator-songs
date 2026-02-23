@@ -239,6 +239,7 @@ import { api } from "@/convex/_generated/api";
 import ScoreRenderer from "../components/Scorerenderer";
 import ScoreInfo from "../components/Scoreinfo";
 import PlaybackBar from "../components/Playbackbar";
+import MetronomeDrumTrack from "../components/Metronomedrumtrack";
 import { usePlayback } from "../../hooks/usePlayback";
 import { generateMusicPiece } from "../../lib/generateMusic";
 import type {
@@ -446,7 +447,6 @@ export default function MusicComposer() {
                       <CheckCircle className="w-3 h-3" /> Saved to library
                     </span>
                   )}
-                  {/* Hide clef toggle in grand staff mode — both clefs always shown */}
                   {notation !== "classical" && (
                     <button
                       onClick={() =>
@@ -473,8 +473,7 @@ export default function MusicComposer() {
               </div>
 
               <div className="overflow-x-auto rounded-lg shadow-2xl">
-                <ScoreRenderer piece={piece} clef={clef} notation={notation} />{" "}
-                {/* 👈 notation passed */}
+                <ScoreRenderer piece={piece} clef={clef} notation={notation} />
               </div>
 
               <ScoreInfo piece={piece} />
@@ -484,6 +483,17 @@ export default function MusicComposer() {
                 tempo={tempo}
                 onToggle={toggle}
                 onTempoChange={setTempo}
+              />
+
+              {/* ── Metronome — timeSig comes from the generated piece itself ──
+                   piece.timeSig is the actual AI-generated time sig, which may
+                   differ from the form selection if the AI adjusted it.
+                   Falls back to the form's timeSig if piece isn't loaded yet.
+              ────────────────────────────────────────────────────────────────── */}
+              <MetronomeDrumTrack
+                tempo={tempo}
+                isPlaying={isPlaying}
+                timeSig={piece.timeSig ?? timeSig}
               />
             </>
           )}
