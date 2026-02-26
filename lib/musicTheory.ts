@@ -180,3 +180,11 @@ export function beatsPerBar(timeSig: string): number {
   if (d === 8) return n * 0.5;
   return n;
 }
+
+export function getBarDuration(timeSig: string): number {
+  const [num, denom] = timeSig.split("/").map(Number);
+  if (!num || !denom) return 4; // fallback
+
+  // General formula: (numerator / denominator) × 4 quarters
+  return (num / denom) * 4;
+}
