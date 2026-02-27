@@ -861,7 +861,6 @@ export default function SongDetailPage() {
             <Staff
               right={rightNotes}
               left={leftNotes}
-              bars={barCount}
               currentBeat={currentBeat}
             />
           </div>
