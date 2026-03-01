@@ -20,6 +20,16 @@ export const saveCustomDraft = mutation({
     barCount: v.number(),
     tempo: v.number(),
     notes: v.array(noteV),
+    // Optional: chord map { "0": { beat1: "Cmaj7", beat2: "Am7" }, ... }
+    chords: v.optional(
+      v.record(
+        v.string(),
+        v.object({
+          beat1: v.optional(v.string()),
+          beat2: v.optional(v.string()),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -33,7 +43,6 @@ export const saveCustomDraft = mutation({
 
     const now = Date.now();
 
-    // Check if a draft with this title already exists for this user
     const existing = await ctx.db
       .query("customDrafts")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
@@ -49,6 +58,7 @@ export const saveCustomDraft = mutation({
         barCount: args.barCount,
         tempo: args.tempo,
         notes: args.notes,
+        chords: args.chords,
         updatedAt: now,
       });
       return match._id;
@@ -62,6 +72,7 @@ export const saveCustomDraft = mutation({
         barCount: args.barCount,
         tempo: args.tempo,
         notes: args.notes,
+        chords: args.chords,
         createdAt: now,
         updatedAt: now,
       });

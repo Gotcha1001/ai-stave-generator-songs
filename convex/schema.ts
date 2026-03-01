@@ -1,37 +1,3 @@
-// import { defineSchema, defineTable } from "convex/server";
-// import { v } from "convex/values";
-
-// export default defineSchema({
-//   users: defineTable({
-//     clerkId: v.string(),
-//     email: v.string(),
-//     name: v.string(),
-//     imageUrl: v.optional(v.string()),
-//     role: v.union(v.literal("admin"), v.literal("user")),
-//     createdAt: v.number(),
-//   }).index("by_clerk_id", ["clerkId"]),
-
-//   songs: defineTable({
-//     userId: v.id("users"),
-//     prompt: v.string(),
-//     key: v.string(),
-//     tempo: v.number(),
-//     rightHand: v.array(
-//       v.object({
-//         pitch: v.string(),
-//         duration: v.string(),
-//       }),
-//     ),
-//     leftHand: v.array(
-//       v.object({
-//         pitch: v.string(),
-//         duration: v.string(),
-//       }),
-//     ),
-//     createdAt: v.number(),
-//   }).index("by_user", ["userId"]),
-// });
-
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
@@ -121,7 +87,7 @@ export default defineSchema({
     prompt: v.string(),
     key: v.string(),
     tempo: v.number(),
-    timeSig: v.optional(v.string()), // ← ADDED (optional so existing docs don't break)
+    timeSig: v.optional(v.string()),
     rightHand: v.array(v.object({ pitch: v.string(), duration: v.string() })),
     leftHand: v.array(v.object({ pitch: v.string(), duration: v.string() })),
     createdAt: v.number(),
@@ -144,6 +110,19 @@ export default defineSchema({
         barIndex: v.number(),
         voice: v.union(v.literal("treble"), v.literal("bass")),
       }),
+    ),
+    // ── Optional chord map: keys are bar indices (as strings), values are
+    //    chord labels e.g. { "0": "Cmaj7", "2": "Am" }. Optional so that
+    //    existing drafts saved before this field was added remain valid.
+    // chord map: string bar index → { beat1?, beat2? }
+    chords: v.optional(
+      v.record(
+        v.string(),
+        v.object({
+          beat1: v.optional(v.string()),
+          beat2: v.optional(v.string()),
+        }),
+      ),
     ),
     createdAt: v.number(),
     updatedAt: v.number(),
