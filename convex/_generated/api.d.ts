@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as customDrafts from "../customDrafts.js";
 import type * as songs from "../songs.js";
 import type * as users from "../users.js";
 
@@ -18,6 +19,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  customDrafts: typeof customDrafts;
   songs: typeof songs;
   users: typeof users;
 }>;

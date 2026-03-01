@@ -8,6 +8,8 @@ import {
   Play,
   LayoutTemplate,
   Sparkles,
+  PenLine,
+  BookMarked,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -28,7 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { UserButton } from "@clerk/nextjs";
 
 const NAV_ITEMS = [
-  { label: "Dashboard", path: "/studio", icon: Home, badge: undefined },
+  { label: "Random Generate", path: "/studio", icon: Home, badge: undefined },
   { label: "Generate AI", path: "/generate", icon: Sparkles, badge: undefined },
   {
     label: "My Pieces AI",
@@ -40,6 +42,18 @@ const NAV_ITEMS = [
     label: "My Pieces Random",
     path: "/songs",
     icon: LayoutTemplate,
+    badge: undefined,
+  },
+  {
+    label: "Custom Writing",
+    path: "/custom-writing",
+    icon: PenLine,
+    badge: "NEW",
+  },
+  {
+    label: "My Custom Pieces",
+    path: "/custom-writing/saved",
+    icon: BookMarked,
     badge: undefined,
   },
 ];
