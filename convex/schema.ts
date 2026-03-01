@@ -126,4 +126,26 @@ export default defineSchema({
     leftHand: v.array(v.object({ pitch: v.string(), duration: v.string() })),
     createdAt: v.number(),
   }).index("by_user", ["userId"]),
+
+  customDrafts: defineTable({
+    userId: v.id("users"),
+    title: v.string(),
+    timeSig: v.string(),
+    keySig: v.string(),
+    template: v.string(),
+    barCount: v.number(),
+    tempo: v.number(),
+    notes: v.array(
+      v.object({
+        id: v.string(),
+        pitch: v.string(),
+        duration: v.string(),
+        isRest: v.boolean(),
+        barIndex: v.number(),
+        voice: v.union(v.literal("treble"), v.literal("bass")),
+      }),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
 });
