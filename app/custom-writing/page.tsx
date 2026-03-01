@@ -71,6 +71,7 @@
 // const STAVE_X_START = 20;
 // const TREBLE_Y = 40;
 // const BASS_Y = 150;
+// const TITLE_OFFSET = 40; // Space above first stave for the piece title
 
 // const VF_TO_TONE: Record<string, string> = {
 //   w: "1n",
@@ -293,7 +294,9 @@
 //           const SINGLE_ROW_H_D = isGrand ? 230 : 130;
 //           const ROW_GAP_D = 50;
 //           const noteRow = Math.floor(n.barIndex / BARS_PER_ROW_D);
-//           const rowTop = noteRow * (SINGLE_ROW_H_D + ROW_GAP_D) + 20;
+//           // ── Account for TITLE_OFFSET so drag snaps to correct pitch ──
+//           const rowTop =
+//             noteRow * (SINGLE_ROW_H_D + ROW_GAP_D) + 20 + TITLE_OFFSET;
 //           const staveTopY = n.voice === "treble" ? rowTop : rowTop + 110;
 //           const slots = n.voice === "treble" ? TREBLE_SLOTS : BASS_SLOTS;
 //           return { ...n, pitch: nearestPitch(y - staveTopY, slots) };
@@ -331,27 +334,41 @@
 //     const totalRows = Math.ceil(barCount / BARS_PER_ROW);
 //     const SINGLE_ROW_H = isGrand ? 230 : 130;
 //     const ROW_GAP = 50;
-//     const TITLE_OFFSET = 40; // ← space reserved for title above staves
 
 //     const canvasW = STAVE_WIDTH * BARS_PER_ROW + STAVE_X_START + 20;
-//     const canvasH = totalRows * (SINGLE_ROW_H + ROW_GAP) + 20 + TITLE_OFFSET; // ← taller
+//     // ── Extra height at top for the title ────────────────────────────────
+//     const canvasH = totalRows * (SINGLE_ROW_H + ROW_GAP) + 20 + TITLE_OFFSET;
 
 //     const renderer = new Renderer(svgRef.current, Renderer.Backends.SVG);
 //     renderer.resize(canvasW, canvasH);
 //     const ctx = renderer.getContext();
 
-//     // ── Draw title above the first row ───────────────────────────────────
-//     if (pieceTitle) {
-//       ctx.save();
-//       ctx.setFont("Arial", 18, "bold");
-//       ctx.setFillStyle("#000000");
-//       ctx.fillText(pieceTitle, canvasW / 2 - pieceTitle.length * 5, 24);
-//       ctx.restore();
-//     }
 //     const svgEl = svgRef.current.querySelector("svg");
 //     if (svgEl) {
 //       svgEl.style.width = canvasW + "px";
 //       svgEl.style.maxWidth = canvasW + "px";
+//     }
+
+//     // ── Draw piece title centred above the first stave row ────────────────
+//     if (pieceTitle) {
+//       // VexFlow's SVG context exposes setAttribute on the underlying element;
+//       // the easiest approach is to inject a <text> node directly into the SVG.
+//       const svgNode = svgRef.current.querySelector("svg");
+//       if (svgNode) {
+//         const titleEl = document.createElementNS(
+//           "http://www.w3.org/2000/svg",
+//           "text",
+//         );
+//         titleEl.setAttribute("x", String(canvasW / 2));
+//         titleEl.setAttribute("y", "26");
+//         titleEl.setAttribute("text-anchor", "middle");
+//         titleEl.setAttribute("font-family", "Arial, sans-serif");
+//         titleEl.setAttribute("font-size", "18");
+//         titleEl.setAttribute("font-weight", "bold");
+//         titleEl.setAttribute("fill", "#000000");
+//         titleEl.textContent = pieceTitle;
+//         svgNode.appendChild(titleEl);
+//       }
 //     }
 
 //     const buildVfNotes = (existing: PlacedNote[], clef: "treble" | "bass") => {
@@ -371,16 +388,14 @@
 //           clef,
 //           keys: [n.isRest ? "b/4" : n.pitch],
 //           duration: n.isRest ? `${n.duration}r` : n.duration,
-//           autoStem: true, // ← add this
+//           autoStem: true,
 //         });
 //         vfNoteMeta.set(note, { id: n.id, isRest: n.isRest, voice: clef });
 //         return note;
 //       });
 
-//       // Fill remaining space with the smallest rest that fits, not always whole rest
 //       const remaining = beatsPerBar(timeSig) - used;
 //       if (remaining > 0.01) {
-//         // Use whole rest only if the bar is empty, otherwise fill with half/quarter
 //         const fillDuration =
 //           remaining >= 4 ? "wr" : remaining >= 2 ? "hr" : "qr";
 //         vfn.push(
@@ -393,7 +408,6 @@
 
 //     const drawVoice = (vfNotes: StaveNote[], stave: Stave) => {
 //       try {
-//         // Build beams BEFORE drawing so VexFlow suppresses flags automatically
 //         const beamableNotes = vfNotes.filter((n) => {
 //           const meta = vfNoteMeta.get(n);
 //           return meta && !meta.isRest && ["8", "16"].includes(n.getDuration());
@@ -415,7 +429,6 @@
 //         new Formatter().joinVoices([v]).format([v], STAVE_WIDTH - 70);
 //         v.draw(ctx, stave);
 
-//         // Draw beams after voice
 //         beams.forEach((b) => b.setContext(ctx).draw());
 
 //         vfNotes.forEach((vfNote) => {
@@ -436,9 +449,11 @@
 //         /* partial bar */
 //       }
 //     };
+
 //     for (let barIdx = 0; barIdx < barCount; barIdx++) {
 //       const row = Math.floor(barIdx / BARS_PER_ROW);
 //       const col = barIdx % BARS_PER_ROW;
+//       // ── All rows shifted down by TITLE_OFFSET ─────────────────────────
 //       const rowTop = row * (SINGLE_ROW_H + ROW_GAP) + 20 + TITLE_OFFSET;
 //       const trebleY = rowTop;
 //       const bassY = rowTop + 110;
@@ -491,7 +506,7 @@
 //       svg?.removeEventListener("click", handleStaveClick);
 //     };
 //     // eslint-disable-next-line react-hooks/exhaustive-deps
-//   }, [notes, timeSig, keySig, template, barCount, draggingId]);
+//   }, [notes, timeSig, keySig, template, barCount, draggingId, pieceTitle]);
 
 //   // ── Playhead overlay ──────────────────────────────────────────────────────
 //   useEffect(() => {
@@ -528,7 +543,8 @@
 //     const beatInBar = currentBeat % bpb;
 //     const row = Math.floor(barIdx / BARS_PER_ROW);
 //     const col = barIdx % BARS_PER_ROW;
-//     const rowTop = row * (SINGLE_ROW_H + ROW_GAP) + 20;
+//     // ── Account for TITLE_OFFSET in playhead position ─────────────────
+//     const rowTop = row * (SINGLE_ROW_H + ROW_GAP) + 20 + TITLE_OFFSET;
 //     const trebleY = rowTop;
 //     const bassY = rowTop + 110;
 
@@ -573,12 +589,16 @@
 //     if (localX < 0) return;
 //     const col = Math.floor(localX / STAVE_WIDTH);
 //     if (col < 0 || col >= BARS_PER_ROW) return;
-//     const row = Math.floor((clickY - 20) / (SINGLE_ROW_H + ROW_GAP));
+//     // ── Subtract TITLE_OFFSET before computing which row was clicked ──
+//     const row = Math.floor(
+//       (clickY - 20 - TITLE_OFFSET) / (SINGLE_ROW_H + ROW_GAP),
+//     );
 //     if (row < 0) return;
 //     const barIdx = row * BARS_PER_ROW + col;
 //     if (barIdx < 0 || barIdx >= bc) return;
 
-//     const rowTop = row * (SINGLE_ROW_H + ROW_GAP) + 20;
+//     // ── rowTop must also include TITLE_OFFSET ─────────────────────────
+//     const rowTop = row * (SINGLE_ROW_H + ROW_GAP) + 20 + TITLE_OFFSET;
 //     const trebleY = rowTop;
 //     const bassY = rowTop + 110;
 
@@ -792,7 +812,7 @@
 //     setNotes([]);
 //   };
 
-//   // ── PDF export (Canvas-based — works with embedded fonts) ─────────────────
+//   // ── PDF export ────────────────────────────────────────────────────────────
 //   const exportPDF = useCallback(() => {
 //     const canvas = exportCanvasRef.current;
 //     if (!canvas) return;
@@ -802,8 +822,11 @@
 //     const totalRows = Math.ceil(barCount / BARS_PER_ROW_E);
 //     const rowHeight = isGrandE ? 230 : 130;
 //     const rowGap = 50;
+//     const PDF_TITLE_OFFSET = 50; // extra space at top of PDF canvas for title
+
 //     const canvasW = STAVE_WIDTH * BARS_PER_ROW_E + STAVE_X_START + 40;
-//     const canvasH = totalRows * (rowHeight + rowGap) + 60;
+//     // ── Taller canvas to fit the title ────────────────────────────────
+//     const canvasH = totalRows * (rowHeight + rowGap) + 60 + PDF_TITLE_OFFSET;
 
 //     canvas.width = canvasW;
 //     canvas.height = canvasH;
@@ -813,11 +836,11 @@
 //     raw.fillStyle = "#ffffff";
 //     raw.fillRect(0, 0, canvasW, canvasH);
 
-//     // ✅ Create renderer AFTER background fill
+//     // ✅ Create VexFlow renderer — NOTE: do NOT draw title here because
+//     //    renderer.resize() calls clearRect internally and will wipe it.
 //     const renderer = new Renderer(canvas, Renderer.Backends.CANVAS);
 //     renderer.resize(canvasW, canvasH);
 //     const ctx = renderer.getContext();
-//     // ... rest stays the same
 
 //     const notesByBarE: Record<number, PlacedNote[]> = {};
 //     for (let i = 0; i < barCount; i++) notesByBarE[i] = [];
@@ -830,7 +853,8 @@
 //       const row = Math.floor(barIdx / BARS_PER_ROW_E);
 //       const col = barIdx % BARS_PER_ROW_E;
 //       const x = STAVE_X_START + col * STAVE_WIDTH;
-//       const y = row * (rowHeight + rowGap) + 30;
+//       // ── All stave rows shifted down by PDF_TITLE_OFFSET ───────────
+//       const y = row * (rowHeight + rowGap) + 30 + PDF_TITLE_OFFSET;
 
 //       const treble = new Stave(x, y, STAVE_WIDTH);
 //       if (col === 0)
@@ -868,7 +892,7 @@
 //               clef,
 //               keys: [n.isRest ? (clef === "bass" ? "d/3" : "b/4") : n.pitch],
 //               duration: n.isRest ? `${n.duration}r` : n.duration,
-//               autoStem: true, // ← add this
+//               autoStem: true,
 //             }),
 //         );
 //         if (beatsPerBar(timeSig) - used > 0.01)
@@ -908,6 +932,17 @@
 //           "bass",
 //           bass,
 //         );
+//     }
+
+//     // ── Draw piece title AFTER all VexFlow rendering ─────────────────────
+//     // renderer.resize() calls clearRect internally — drawing the title last
+//     // guarantees it is never wiped before the canvas snapshot is taken.
+//     if (pieceTitle) {
+//       raw.font = "bold 20px Arial, sans-serif";
+//       raw.fillStyle = "#000000";
+//       raw.textAlign = "center";
+//       raw.fillText(pieceTitle, canvasW / 2, PDF_TITLE_OFFSET - 14);
+//       raw.textAlign = "left";
 //     }
 
 //     // Export canvas to PDF
@@ -1308,6 +1343,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
@@ -1398,6 +1441,14 @@ function nearestPitch(relY: number, slots: { pitch: string; y: number }[]) {
   ).pitch;
 }
 
+// ── Chord map: barIndex → { beat1?, beat2? } (lead-sheet only) ──────────────
+// beat1 = first half of bar, beat2 = second half (both optional)
+interface BarChords {
+  beat1?: string;
+  beat2?: string;
+}
+type ChordMap = Record<number, BarChords>;
+
 interface NoteMetadata {
   id: string;
   isRest: boolean;
@@ -1424,6 +1475,12 @@ function CustomWritingPageInner() {
   const [tempo, setTempo] = useState(100);
   const [currentBeat, setCurrentBeat] = useState(0);
   const [pieceTitle, setPieceTitle] = useState("My Custom Piece");
+  const [chords, setChords] = useState<ChordMap>({});
+  const [chordMode, setChordMode] = useState(false);
+  // Dialog state — null means closed, number = bar index being edited
+  const [chordDialogBar, setChordDialogBar] = useState<number | null>(null);
+  const [chordInput, setChordInput] = useState(""); // beat1
+  const [chordInput2, setChordInput2] = useState(""); // beat2
 
   const svgRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -1458,6 +1515,13 @@ function CustomWritingPageInner() {
     setBarCount(match.barCount ?? 4);
     setTempo(match.tempo ?? 100);
     setPieceTitle(match.title ?? "My Custom Piece");
+    // Convex stores record keys as strings — convert back to number keys
+    const rawChords = (match.chords as Record<string, BarChords>) ?? {};
+    setChords(
+      Object.fromEntries(
+        Object.entries(rawChords).map(([k, v]) => [Number(k), v]),
+      ),
+    );
     setNotes((match.notes as PlacedNote[]) ?? []);
     setHistory([(match.notes as PlacedNote[]) ?? []]);
     setHistoryIdx(0);
@@ -1521,6 +1585,8 @@ function CustomWritingPageInner() {
     barCount,
     history,
     historyIdx,
+    chordMode,
+    chords,
   });
   stateRef.current = {
     notes,
@@ -1530,6 +1596,8 @@ function CustomWritingPageInner() {
     barCount,
     history,
     historyIdx,
+    chordMode,
+    chords,
   };
 
   const isGrand = template === "grand-staff";
@@ -1537,6 +1605,11 @@ function CustomWritingPageInner() {
   useEffect(() => {
     if (!isGrand) setActiveVoice("treble");
   }, [isGrand]);
+
+  // Close chord dialog when chord mode is turned off or template changes
+  useEffect(() => {
+    if (!chordMode) setChordDialogBar(null);
+  }, [chordMode, template]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const notesByBar = useMemo(() => {
@@ -1775,6 +1848,71 @@ function CustomWritingPageInner() {
         );
     }
 
+    // ── Draw chord highlights + symbols above stave (lead-sheet only) ──────
+    if (!isGrand) {
+      const svgNode = svgRef.current.querySelector("svg");
+      if (svgNode) {
+        for (let barIdx = 0; barIdx < barCount; barIdx++) {
+          const bc = chords[barIdx];
+          if (!bc?.beat1 && !bc?.beat2) continue;
+
+          const row = Math.floor(barIdx / BARS_PER_ROW);
+          const col = barIdx % BARS_PER_ROW;
+          const rowTop = row * (SINGLE_ROW_H + ROW_GAP) + 20 + TITLE_OFFSET;
+          const staveX = STAVE_X_START + col * STAVE_WIDTH;
+          const usableX = staveX + (col === 0 ? 80 : 8);
+          const usableW = STAVE_WIDTH - (col === 0 ? 80 : 8) - 4;
+          const halfW = usableW / 2;
+          const highlightY = rowTop - 18;
+          const highlightH = 16;
+          const chordY = rowTop - 5;
+
+          const drawHighlight = (x: number, w: number, color: string) => {
+            const rect = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "rect",
+            );
+            rect.setAttribute("x", String(x));
+            rect.setAttribute("y", String(highlightY));
+            rect.setAttribute("width", String(w));
+            rect.setAttribute("height", String(highlightH));
+            rect.setAttribute("rx", "3");
+            rect.setAttribute("fill", color);
+            rect.setAttribute("opacity", "0.18");
+            svgNode.appendChild(rect);
+          };
+
+          const drawChordText = (label: string, x: number) => {
+            const textEl = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "text",
+            );
+            textEl.setAttribute("x", String(x + 3));
+            textEl.setAttribute("y", String(chordY));
+            textEl.setAttribute("font-family", "Arial, sans-serif");
+            textEl.setAttribute("font-size", "12");
+            textEl.setAttribute("font-weight", "bold");
+            textEl.setAttribute("fill", "#1d4ed8");
+            textEl.textContent = label;
+            svgNode.appendChild(textEl);
+          };
+
+          if (bc.beat1 && bc.beat2) {
+            drawHighlight(usableX, halfW - 1, "#3b82f6");
+            drawHighlight(usableX + halfW + 1, halfW - 1, "#6366f1");
+            drawChordText(bc.beat1, usableX);
+            drawChordText(bc.beat2, usableX + halfW + 1);
+          } else if (bc.beat1) {
+            drawHighlight(usableX, usableW, "#3b82f6");
+            drawChordText(bc.beat1, usableX);
+          } else if (bc.beat2) {
+            drawHighlight(usableX + halfW + 1, halfW - 1, "#6366f1");
+            drawChordText(bc.beat2, usableX + halfW + 1);
+          }
+        }
+      }
+    }
+
     const svg = svgRef.current.querySelector("svg");
     if (svg) {
       svg.style.cursor = draggingId ? "ns-resize" : "crosshair";
@@ -1784,7 +1922,16 @@ function CustomWritingPageInner() {
       svg?.removeEventListener("click", handleStaveClick);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notes, timeSig, keySig, template, barCount, draggingId, pieceTitle]);
+  }, [
+    notes,
+    timeSig,
+    keySig,
+    template,
+    barCount,
+    draggingId,
+    pieceTitle,
+    chords,
+  ]);
 
   // ── Playhead overlay ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -2064,6 +2211,19 @@ function CustomWritingPageInner() {
         barCount,
         tempo,
         notes,
+        // Convex v.record requires string keys — convert from number-keyed ChordMap.
+        // Only include the field when there are chords; omitting it keeps
+        // backwards-compatibility if the schema migration hasn't run yet.
+        ...(Object.keys(chords).length > 0
+          ? {
+              chords: Object.fromEntries(
+                Object.entries(chords).map(([k, v]) => [
+                  String(k),
+                  v as BarChords,
+                ]),
+              ),
+            }
+          : {}),
       });
       setSavedMsg("Saved ✓");
     } catch {
@@ -2076,6 +2236,7 @@ function CustomWritingPageInner() {
           notes,
           barCount,
           title: pieceTitle,
+          chords,
         }),
       );
       setSavedMsg("Saved locally ✓");
@@ -2212,6 +2373,52 @@ function CustomWritingPageInner() {
         );
     }
 
+    // ── Draw chord highlights + symbols in PDF (lead-sheet only) ──────────
+    if (!isGrandE && Object.keys(chords).length > 0) {
+      raw.textAlign = "left";
+      for (let barIdx = 0; barIdx < barCount; barIdx++) {
+        const bc = chords[barIdx];
+        if (!bc?.beat1 && !bc?.beat2) continue;
+        const row = Math.floor(barIdx / BARS_PER_ROW_E);
+        const col = barIdx % BARS_PER_ROW_E;
+        const rowTop = row * (rowHeight + rowGap) + 30 + PDF_TITLE_OFFSET;
+        const staveX = STAVE_X_START + col * STAVE_WIDTH;
+        const usableX = staveX + (col === 0 ? 80 : 8);
+        const usableW = STAVE_WIDTH - (col === 0 ? 80 : 8) - 4;
+        const halfW = usableW / 2;
+        const highlightY = rowTop - 18;
+        const highlightH = 15;
+        const chordY = rowTop - 6;
+
+        const drawBox = (x: number, w: number, color: string) => {
+          raw.fillStyle = color;
+          raw.globalAlpha = 0.18;
+          raw.beginPath();
+          raw.roundRect(x, highlightY, w, highlightH, 3);
+          raw.fill();
+          raw.globalAlpha = 1;
+        };
+        const drawText = (label: string, x: number) => {
+          raw.font = "bold 12px Arial, sans-serif";
+          raw.fillStyle = "#1d4ed8";
+          raw.fillText(label, x + 3, chordY);
+        };
+
+        if (bc.beat1 && bc.beat2) {
+          drawBox(usableX, halfW - 1, "#3b82f6");
+          drawBox(usableX + halfW + 1, halfW - 1, "#6366f1");
+          drawText(bc.beat1, usableX);
+          drawText(bc.beat2, usableX + halfW + 1);
+        } else if (bc.beat1) {
+          drawBox(usableX, usableW, "#3b82f6");
+          drawText(bc.beat1, usableX);
+        } else if (bc.beat2) {
+          drawBox(usableX + halfW + 1, halfW - 1, "#6366f1");
+          drawText(bc.beat2, usableX + halfW + 1);
+        }
+      }
+    }
+
     // ── Draw piece title AFTER all VexFlow rendering ─────────────────────
     // renderer.resize() calls clearRect internally — drawing the title last
     // guarantees it is never wiped before the canvas snapshot is taken.
@@ -2246,7 +2453,7 @@ function CustomWritingPageInner() {
     }
 
     pdf.save(`${pieceTitle.replace(/\s+/g, "-")}.pdf`);
-  }, [notes, barCount, template, timeSig, keySig, pieceTitle]);
+  }, [notes, barCount, template, timeSig, keySig, pieceTitle, chords]);
 
   // ── Toolbar ───────────────────────────────────────────────────────────────
   const toolBtn = (tool: (typeof NOTE_TOOLS)[0]) => (
@@ -2371,6 +2578,26 @@ function CustomWritingPageInner() {
               className="h-7 w-14 px-2 rounded border border-border bg-background text-xs"
             />
           </div>
+
+          {!isGrand && (
+            <>
+              <Separator orientation="vertical" className="h-5 shrink-0" />
+              <button
+                onClick={() => {
+                  setChordMode((m) => !m);
+                  setChordDialogBar(null);
+                }}
+                className={`h-7 px-2.5 rounded text-xs font-semibold border transition-all shrink-0
+                  ${
+                    chordMode
+                      ? "border-blue-500 bg-blue-500/10 text-blue-400 shadow-[0_0_6px_rgba(59,130,246,0.4)]"
+                      : "border-border text-muted-foreground hover:border-blue-400/50"
+                  }`}
+              >
+                𝄫 Chords
+              </button>
+            </>
+          )}
 
           {isGrand && (
             <>
@@ -2513,6 +2740,11 @@ function CustomWritingPageInner() {
             <Badge variant="outline" className="text-[10px]">
               {NOTE_TOOLS.find((t) => t.id === selectedTool)?.label}
             </Badge>
+            {chordMode && !isGrand && (
+              <Badge className="text-[10px] bg-blue-500/20 text-blue-400 border border-blue-500/40 animate-pulse">
+                𝄫 Click bar to add chord
+              </Badge>
+            )}
             {draggingId && (
               <Badge variant="secondary" className="text-[10px] animate-pulse">
                 Drag to repitch ↕
@@ -2528,12 +2760,170 @@ function CustomWritingPageInner() {
               className="bg-white dark:bg-zinc-900 rounded-xl shadow-inner border border-border p-4 overflow-x-auto select-none relative"
               style={{ minHeight: 200 }}
             >
-              <div ref={svgRef} style={{ display: "inline-block" }} />
+              <div
+                ref={svgRef}
+                style={{ display: "inline-block" }}
+                onClick={(e) => {
+                  if (!chordMode || isGrand) return;
+
+                  const svg = svgRef.current?.querySelector("svg");
+                  if (!svg) return;
+                  const rect = svg.getBoundingClientRect();
+                  const clickX = e.clientX - rect.left;
+                  const clickY = e.clientY - rect.top;
+
+                  console.log("[Chord] SVG div clicked in chord mode", {
+                    clickX,
+                    clickY,
+                  });
+
+                  const SINGLE_ROW_H = 130;
+                  const ROW_GAP = 50;
+                  const localX = clickX - STAVE_X_START;
+                  if (localX < 0) {
+                    console.log("[Chord] localX < 0, ignoring");
+                    return;
+                  }
+                  const col = Math.floor(localX / STAVE_WIDTH);
+                  if (col < 0 || col >= BARS_PER_ROW) {
+                    console.log("[Chord] col out of range", col);
+                    return;
+                  }
+                  const row = Math.floor(
+                    (clickY - 20 - TITLE_OFFSET) / (SINGLE_ROW_H + ROW_GAP),
+                  );
+                  if (row < 0) {
+                    console.log("[Chord] row < 0", row);
+                    return;
+                  }
+                  const barIdx = row * BARS_PER_ROW + col;
+                  if (barIdx < 0 || barIdx >= barCount) {
+                    console.log("[Chord] barIdx out of range", barIdx);
+                    return;
+                  }
+
+                  console.log(
+                    "[Chord] Opening dialog for bar",
+                    barIdx,
+                    "existing:",
+                    chords[barIdx],
+                  );
+                  e.stopPropagation();
+                  setChordInput(chords[barIdx]?.beat1 ?? "");
+                  setChordInput2(chords[barIdx]?.beat2 ?? "");
+                  setChordDialogBar(barIdx);
+                }}
+              />
+
+              {/* ── Chord Dialog ──────────────────────────────────────── */}
+              <Dialog
+                open={chordDialogBar !== null}
+                onOpenChange={(open) => {
+                  if (!open) setChordDialogBar(null);
+                }}
+              >
+                <DialogContent className="sm:max-w-xs">
+                  <DialogHeader>
+                    <DialogTitle>
+                      Chords — Bar{" "}
+                      {chordDialogBar !== null ? chordDialogBar + 1 : ""}
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="py-2 flex flex-col gap-3">
+                    <div>
+                      <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+                        Beat 1 chord{" "}
+                        <span className="font-normal">(first half)</span>
+                      </label>
+                      <Input
+                        autoFocus
+                        value={chordInput}
+                        onChange={(e) => setChordInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setChordDialogBar(null);
+                        }}
+                        placeholder="e.g. Cmaj7"
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+                        Beat 2 chord{" "}
+                        <span className="font-normal">
+                          (second half, optional)
+                        </span>
+                      </label>
+                      <Input
+                        value={chordInput2}
+                        onChange={(e) => setChordInput2(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setChordDialogBar(null);
+                        }}
+                        placeholder="e.g. Am7"
+                        className="text-sm"
+                      />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Leave both empty to clear chords from this bar.
+                    </p>
+                  </div>
+                  <DialogFooter className="gap-2 sm:gap-2">
+                    {chordDialogBar !== null &&
+                      (chords[chordDialogBar]?.beat1 ||
+                        chords[chordDialogBar]?.beat2) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-400 hover:text-red-300 mr-auto"
+                          onClick={() => {
+                            setChords((prev) => {
+                              const next = { ...prev };
+                              delete next[chordDialogBar!];
+                              return next;
+                            });
+                            setChordDialogBar(null);
+                          }}
+                        >
+                          Remove all
+                        </Button>
+                      )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setChordDialogBar(null)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        const b1 = chordInput.trim();
+                        const b2 = chordInput2.trim();
+                        setChords((prev) => {
+                          const next = { ...prev };
+                          if (b1 || b2)
+                            next[chordDialogBar!] = {
+                              beat1: b1 || undefined,
+                              beat2: b2 || undefined,
+                            };
+                          else delete next[chordDialogBar!];
+                          return next;
+                        });
+                        setChordDialogBar(null);
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
               {notes.length === 0 && (
                 <p className="text-center text-sm text-muted-foreground mt-2 pointer-events-none">
                   {isGrand
                     ? `${activeVoice === "treble" ? "𝄞 Right Hand" : "𝄢 Left Hand"} active — click stave to add notes, drag notes up/down to repitch.`
-                    : "Select a note then click the stave. Drag placed notes up/down to change pitch."}
+                    : chordMode
+                      ? "Chord mode active — click any bar to type a chord symbol above it."
+                      : "Select a note then click the stave. Drag placed notes up/down to change pitch."}
                 </p>
               )}
             </div>
