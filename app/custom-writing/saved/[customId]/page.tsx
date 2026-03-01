@@ -145,8 +145,18 @@ export default function SavedPieceView() {
             n.isRest ? (clef === "treble" ? "b/4" : "d/3") : n.pitch,
           ];
           const duration = n.isRest ? `${n.duration}r` : n.duration;
-          return new StaveNote({ clef, keys, duration });
+          return new StaveNote({ clef, keys, duration, autoStem: true });
         });
+
+        // Build beams BEFORE drawing so VexFlow suppresses flags
+        const beamable = vfNotes.filter(
+          (n) => !n.isRest && ["8", "16"].includes(n.getDuration()),
+        );
+        const beams: InstanceType<typeof Beam>[] = [];
+        for (let i = 0; i < beamable.length - 1; i += 2) {
+          const group = beamable.slice(i, i + 2);
+          if (group.length === 2) beams.push(new Beam(group));
+        }
 
         try {
           const voice = new Voice({ numBeats, beatValue }).setStrict(false);
@@ -154,12 +164,8 @@ export default function SavedPieceView() {
           new Formatter().joinVoices([voice]).format([voice], STAVE_WIDTH - 70);
           voice.draw(ctx, stave);
 
-          Beam.generateBeams(vfNotes.filter((n) => !n.isRest)).forEach((b) =>
-            b.setContext(ctx).draw(),
-          );
-          console.log(
-            `Rendered ${clef} voice for bar ${barIdx}: ${vfNotes.length} notes`,
-          );
+          // Draw beams after voice
+          beams.forEach((b) => b.setContext(ctx).draw());
         } catch (err) {
           console.error(`Voice render failed in bar ${barIdx} (${clef}):`, err);
         }
