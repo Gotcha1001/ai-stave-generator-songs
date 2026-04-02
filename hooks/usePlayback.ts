@@ -1,7 +1,7 @@
 "use client";
 import { useRef, useState, useCallback, useEffect } from "react";
 import * as Tone from "tone";
-import { parsePitch, restoreKeyAccidental } from "@/lib/musicTheory";
+import { parsePitch } from "@/lib/musicTheory"; // ← removed restoreKeyAccidental
 import { MusicPiece } from "@/types/music";
 
 interface UsePlaybackReturn {
@@ -20,6 +20,7 @@ let samplerLoadPromise: Promise<void> | null = null;
 
 function getSampler(): Promise<void> {
   if (samplerInstance && samplerLoadPromise) return samplerLoadPromise;
+
   samplerInstance = new Tone.Sampler({
     urls: {
       A0: "A0.mp3",
@@ -56,6 +57,7 @@ function getSampler(): Promise<void> {
     baseUrl: "https://tonejs.github.io/audio/salamander/",
     release: 1.5,
   }).toDestination();
+
   samplerLoadPromise = Tone.loaded();
   return samplerLoadPromise;
 }
@@ -70,16 +72,17 @@ export function usePlayback(piece: MusicPiece | null): UsePlaybackReturn {
   const partRef = useRef<Tone.Part | null>(null);
   const rafRef = useRef<number | null>(null);
   const tempoRef = useRef(tempo);
+
   useEffect(() => {
     tempoRef.current = tempo;
   }, [tempo]);
 
-  // Load sampler on mount
+  // Load sampler
   useEffect(() => {
     getSampler().then(() => setSamplerReady(true));
   }, []);
 
-  // ── RAF clock
+  // RAF clock for currentBeat
   const updateClockRef = useRef<() => void>(() => {});
   useEffect(() => {
     updateClockRef.current = () => {
@@ -124,6 +127,7 @@ export function usePlayback(piece: MusicPiece | null): UsePlaybackReturn {
         duration: number;
         velocity: number;
       };
+
       const events: NoteEvent[] = [];
       let tRight = 0;
       let tLeft = 0;
@@ -134,17 +138,16 @@ export function usePlayback(piece: MusicPiece | null): UsePlaybackReturn {
 
         for (const bar of sec.bars) {
           // Right hand
-          // ✅ Pitches are stored with full accidentals from the generator —
-          //    use note.pitch directly, no restoreKeyAccidental needed.
           for (const note of bar.notes) {
             const durSec = note.duration * secPerBeat;
             const isRest = note.rest || note.pitch === "rest";
+
             if (!isRest) {
               const parsed = parsePitch(note.pitch);
               if (parsed) {
                 events.push({
                   time: tRight,
-                  note: restoreKeyAccidental(note.pitch, piece.key),
+                  note: note.pitch, // ← Full accidental pitch
                   duration: durSec,
                   velocity: 0.8,
                 });
@@ -154,17 +157,17 @@ export function usePlayback(piece: MusicPiece | null): UsePlaybackReturn {
           }
 
           // Left hand
-          // ✅ Same — pitches already have accidentals, use directly.
           if (bar.leftNotes?.length) {
             for (const note of bar.leftNotes) {
               const durSec = note.duration * secPerBeat;
               const isRest = note.rest || note.pitch === "rest";
+
               if (!isRest) {
                 const parsed = parsePitch(note.pitch);
                 if (parsed) {
                   events.push({
                     time: tLeft,
-                    note: restoreKeyAccidental(note.pitch, piece.key),
+                    note: note.pitch, // ← Full accidental pitch
                     duration: durSec,
                     velocity: 0.55,
                   });
@@ -189,18 +192,17 @@ export function usePlayback(piece: MusicPiece | null): UsePlaybackReturn {
           event.velocity,
         );
       }, events);
+
       part.start(0);
       partRef.current = part;
 
       const totalDuration = Math.max(tRight, tLeft);
+
       Tone.getTransport().start();
       setIsPlaying(true);
-
       rafRef.current = requestAnimationFrame(updateClockRef.current);
 
-      Tone.getTransport().scheduleOnce(() => {
-        stop();
-      }, totalDuration + 1.5);
+      Tone.getTransport().scheduleOnce(() => stop(), totalDuration + 1.5);
     },
     [piece, stop, samplerReady],
   );
@@ -225,11 +227,9 @@ export function usePlayback(piece: MusicPiece | null): UsePlaybackReturn {
     [isPlaying, stop, play],
   );
 
-  // Cleanup on unmount
+  // Cleanup
   useEffect(() => {
-    return () => {
-      stop();
-    };
+    return () => stop();
   }, [stop]);
 
   return {

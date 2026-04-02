@@ -498,27 +498,40 @@
 //   return piece;
 // }
 import type { MusicPiece, GenerateOptions } from "../types/music";
-import { stripKeyAccidental } from "./musicTheory";
 
 const SYSTEM_PROMPT = `You are a professional music composer and conservatory-trained music theorist. Your task is to generate complete, musically coherent compositions as structured JSON.
 
 ABSOLUTE RULES — violating these makes the piece unplayable:
 1. Notes in each bar MUST sum EXACTLY to the bar duration in quarter-note units:
-   - 4/4 → notes must sum to 4.0  (e.g. four 1.0s, or eight 0.5s, or one 2.0 + two 1.0s)
+   - 4/4 → notes must sum to 4.0
    - 3/4 → notes must sum to 3.0
-   - 6/8 → notes must sum to 3.0  (six 0.5s, or two 1.5s, or three 1.0s)
+   - 6/8 → notes must sum to 3.0
    - 2/4 → notes must sum to 2.0
-   THIS IS THE MOST IMPORTANT RULE. Count the durations before finalising each bar.
-   A bar with wrong total duration will break the score. Double-check every bar.
-2. Use proper voice leading: avoid large random leaps, prefer stepwise motion, resolve tendency tones.
-3. End every phrase on a stable tone (tonic, 3rd, or 5th). End the piece on the tonic.
-4. Chord tones should dominate (70%+ of notes should be chord tones); passing/neighbor tones add colour.
+   Count the durations carefully before finalising each bar.
+
+2. Use proper voice leading: prefer stepwise motion, resolve tendency tones.
+
+3. End every phrase on a stable tone (tonic, 3rd, or 5th). End the piece on the tonic with a perfect authentic cadence.
+
+4. Chord tones should dominate (70%+ of notes); passing/neighbor tones add colour.
+
 5. ALWAYS include quavers (duration 0.5) unless difficulty is beginner.
+
 6. Repetition is essential: the A section must return recognisably. The B section should contrast.
-7. Pitch strings must be formatted as NoteName+Octave e.g. "C4", "F#4", "Bb3". No spaces.
+
+7. Pitch strings must be formatted as NoteName+Octave with correct accidental, e.g. "C4", "F#4", "Bb3", "G#5". 
+   ALWAYS include the accidental (# or b) if the note requires it according to the key.
+
 8. Rest objects must have: { "pitch": "rest", "duration": X, "rest": true }
-9. When writing pitches, DO NOT include accidentals that are already implied by the key signature.
-   For example, in G major write "F4" not "F#4". Only use accidentals for notes outside the key.
+
+9. **Pitch Accidentals Rule (Very Important):**
+   Always output the **sounding pitch** with its correct accidental based on the requested key.
+   Examples:
+   - In G major: use "F#4", never "F4"
+   - In F major: use "Bb3", never "B3"
+   - In Bb major: use "Bb3", "Eb4", "Ab4"
+   - In C major or Am: only use #/b for true chromatic notes
+   Do NOT strip accidentals yourself. Output what the performer should actually play and hear.
 
 DIFFICULTY GUIDE:
 - beginner: Only quarter (1) and half (2) notes. Stepwise motion. One octave range max. 2–4 bars per section.
@@ -583,49 +596,37 @@ Return ONLY valid JSON (no markdown, no explanation) matching this schema:
 `;
 
 // ── Bar duration post-processor ────────────────────────────────────────────
-// Converts timeSig (e.g. "6/8") to the expected total duration in quarter-note
-// units. All note durations in this codebase are in quarter-note units:
-//   quarter = 1.0, half = 2.0, quaver = 0.5, semiquaver = 0.25, dotted quarter = 1.5
-// For 6/8: 6 eighth notes = 3 quarter-note units → barDur = 3.0
 function getBarDuration(timeSig: string): number {
   const [num, denom] = timeSig.split("/").map(Number);
-  return (num / denom) * 4; // e.g. 6/8 → (6/8)*4 = 3.0, 4/4 → 4.0
+  return (num / denom) * 4;
 }
 
 type NoteEntry = { pitch: string; duration: number; rest?: boolean };
 
 function fixNotes(notes: NoteEntry[], barDur: number): NoteEntry[] {
   if (!Array.isArray(notes) || notes.length === 0) {
-    // Empty — fill with a whole-bar rest
     return [{ pitch: "rest", duration: barDur, rest: true }];
   }
 
   const total = notes.reduce((s, n) => s + (n.duration ?? 0), 0);
   const EPSILON = 0.02;
 
-  // Already correct
   if (Math.abs(total - barDur) < EPSILON) return notes;
 
   if (total > barDur + EPSILON) {
-    // Overfull: walk notes in order, keep each only if it fits in remaining budget
     const trimmed: NoteEntry[] = [];
     let remaining = barDur;
     for (const note of notes) {
       if (remaining <= EPSILON) break;
       if (note.duration <= remaining + EPSILON) {
-        // Note fits entirely
         trimmed.push({ ...note, duration: note.duration });
         remaining -= note.duration;
       } else {
-        // Note is too long — snap it down to fill the remaining gap
         const snapped = snapDuration(remaining);
-        if (snapped > 0) {
-          trimmed.push({ ...note, duration: snapped });
-        }
+        if (snapped > 0) trimmed.push({ ...note, duration: snapped });
         remaining = 0;
       }
     }
-    // If trimming left us short, pad with a rest
     const trimTotal = trimmed.reduce((s, n) => s + n.duration, 0);
     const gap = barDur - trimTotal;
     if (gap > EPSILON) {
@@ -636,7 +637,6 @@ function fixNotes(notes: NoteEntry[], barDur: number): NoteEntry[] {
     return trimmed;
   }
 
-  // Underfull: append a rest to fill the gap
   const gap = barDur - total;
   const snapped = snapDuration(gap);
   if (snapped > 0) {
@@ -645,7 +645,6 @@ function fixNotes(notes: NoteEntry[], barDur: number): NoteEntry[] {
   return notes;
 }
 
-// Snap a duration to the nearest standard value
 function snapDuration(dur: number): number {
   const valid = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
   let best = valid[0];
@@ -657,81 +656,34 @@ function snapDuration(dur: number): number {
       best = v;
     }
   }
-  return bestDiff < 0.2 ? best : 0; // 0 = skip if nothing close
+  return bestDiff < 0.2 ? best : 0;
 }
 
 function sanitisePiece(piece: MusicPiece): MusicPiece {
   const barDur = getBarDuration(piece.timeSig);
   let fixCount = 0;
 
-  // Pre-pass: log all bars with wrong durations before fixing
-  for (const section of piece.sections) {
-    section.bars.forEach((bar, idx) => {
-      const t = bar.notes?.reduce((s, n) => s + n.duration, 0) ?? 0;
-      const lt = bar.leftNotes?.reduce((s, n) => s + n.duration, 0) ?? null;
-      if (Math.abs(t - barDur) > 0.02)
-        console.warn(
-          `⚠️ [${section.id}] bar ${idx + 1} notes sum=${t.toFixed(2)} expected=${barDur}`,
-        );
-      if (lt !== null && Math.abs(lt - barDur) > 0.02)
-        console.warn(
-          `⚠️ [${section.id}] bar ${idx + 1} leftNotes sum=${lt.toFixed(2)} expected=${barDur}`,
-        );
-    });
-  }
-
   for (const section of piece.sections) {
     for (const bar of section.bars) {
       const origTotal = bar.notes?.reduce((s, n) => s + n.duration, 0) ?? 0;
       bar.notes = fixNotes(bar.notes ?? [], barDur) as typeof bar.notes;
 
-      if (Math.abs(origTotal - barDur) > 0.02) {
-        fixCount++;
-      }
+      if (Math.abs(origTotal - barDur) > 0.02) fixCount++;
 
       if (bar.leftNotes && bar.leftNotes.length > 0) {
         const origLeft = bar.leftNotes.reduce((s, n) => s + n.duration, 0);
         bar.leftNotes = fixNotes(bar.leftNotes, barDur) as typeof bar.leftNotes;
-        if (Math.abs(origLeft - barDur) > 0.02) {
-          fixCount++;
-        }
+        if (Math.abs(origLeft - barDur) > 0.02) fixCount++;
       }
     }
   }
 
-  if (fixCount > 0) {
-    console.log(
-      `🔧 sanitisePiece: fixed ${fixCount} bar(s) with wrong duration (timeSig=${piece.timeSig}, barDur=${barDur})`,
-    );
-  } else {
-    console.log(
-      `✅ sanitisePiece: all bars correct (timeSig=${piece.timeSig}, barDur=${barDur})`,
-    );
-  }
+  console.log(
+    fixCount > 0
+      ? `🔧 sanitisePiece: fixed ${fixCount} bar(s)`
+      : `✅ sanitisePiece: all bars correct`,
+  );
 
-  return piece;
-}
-
-// ── Key accidental post-processor ──────────────────────────────────────────
-// Strips accidentals from pitches that are already implied by the key
-// signature — e.g. "F#4" in G major becomes "F4" because the key sig
-// already tells the reader every F is sharp.
-function stripKeyAccidentalsFromPiece(piece: MusicPiece): MusicPiece {
-  const key = piece.key ?? "C";
-  for (const section of piece.sections) {
-    for (const bar of section.bars) {
-      bar.notes = bar.notes.map((n) => ({
-        ...n,
-        pitch: stripKeyAccidental(n.pitch, key),
-      }));
-      if (bar.leftNotes) {
-        bar.leftNotes = bar.leftNotes.map((n) => ({
-          ...n,
-          pitch: stripKeyAccidental(n.pitch, key),
-        }));
-      }
-    }
-  }
   return piece;
 }
 
@@ -786,18 +738,12 @@ Requirements:
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
 
-  interface AnthropicContentBlock {
-    type: string;
-    text?: string;
-  }
-
   const data = (await response.json()) as {
-    content?: AnthropicContentBlock[];
+    content?: { type: string; text?: string }[];
   };
 
   const text = data.content?.map((c) => c.text ?? "").join("") ?? "";
 
-  // ✅ Safer JSON extraction
   const firstBrace = text.indexOf("{");
   const lastBrace = text.lastIndexOf("}");
   if (firstBrace === -1 || lastBrace === -1) {
@@ -812,24 +758,11 @@ Requirements:
     piece = JSON.parse(jsonString);
 
     console.log("🎼 Generated piece:", JSON.stringify(piece, null, 2));
-    console.log(
-      "🎼 First bar leftNotes:",
-      piece.sections?.[0]?.bars?.[0]?.leftNotes,
-    );
-
-    // 🔍 Extra validation for classical mode
-    if (notation === "classical") {
-      const firstBar = piece.sections?.[0]?.bars?.[0];
-      if (!firstBar?.leftNotes || firstBar.leftNotes.length === 0) {
-        console.warn(
-          "⚠️ Classical notation requested but leftNotes missing or empty.",
-        );
-      }
-    }
   } catch (e) {
     throw new Error("Invalid JSON from AI: " + (e as Error).message);
   }
 
+  // ── Safety checks ─────────────────────────────────────────────────────
   if (!piece.sections || !Array.isArray(piece.sections)) {
     throw new Error("Piece missing sections array");
   }
@@ -838,11 +771,19 @@ Requirements:
     piece.structure = piece.sections.map((s) => s.id);
   }
 
-  // ✅ Post-process: clamp all bars to correct duration
+  // Force the requested key if user didn't choose "auto"
+  if (key !== "auto" && piece.key.toUpperCase() !== key.toUpperCase()) {
+    console.warn(
+      `AI returned key "${piece.key}" but user requested "${key}". Forcing requested key.`,
+    );
+    piece.key = key;
+  }
+
+  // ── Post-processing ───────────────────────────────────────────────────
   piece = sanitisePiece(piece);
 
-  // ✅ Post-process: strip accidentals already covered by the key signature
-  piece = stripKeyAccidentalsFromPiece(piece);
+  // We no longer strip accidentals — we now store full accidentals (F#4, Bb3, etc.)
+  // This makes rendering and playback consistent with the random MIDI generator.
 
   return piece;
 }
