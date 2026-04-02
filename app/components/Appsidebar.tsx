@@ -10,6 +10,8 @@ import {
   Sparkles,
   PenLine,
   BookMarked,
+  Piano,
+  Music4Icon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -54,6 +56,18 @@ const NAV_ITEMS = [
     label: "My Custom Pieces",
     path: "/custom-writing/saved",
     icon: BookMarked,
+    badge: undefined,
+  },
+  {
+    label: "Midi Composition",
+    path: "/studio/midi-record",
+    icon: Piano,
+    badge: undefined,
+  },
+  {
+    label: "Midi Recordings",
+    path: "/recordings",
+    icon: Music4Icon,
     badge: undefined,
   },
 ];

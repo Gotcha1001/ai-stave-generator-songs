@@ -9,6 +9,7 @@
  */
 
 import type * as customDrafts from "../customDrafts.js";
+import type * as midi from "../midi.js";
 import type * as songs from "../songs.js";
 import type * as users from "../users.js";
 
@@ -20,6 +21,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   customDrafts: typeof customDrafts;
+  midi: typeof midi;
   songs: typeof songs;
   users: typeof users;
 }>;

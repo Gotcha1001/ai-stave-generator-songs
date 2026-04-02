@@ -127,4 +127,39 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
+
+  midiRecordings: defineTable({
+    userId: v.id("users"),
+    title: v.string(),
+    createdAt: v.number(), // timestamp
+    tempo: v.number(),
+    timeSig: v.string(), // "4/4", "3/4", etc.
+    bars: v.array(
+      v.object({
+        chord: v.optional(v.string()),
+        chordName: v.optional(v.string()),
+        notes: v.array(
+          v.object({
+            pitch: v.string(),
+            duration: v.number(),
+            rest: v.optional(v.boolean()),
+            tied: v.optional(v.boolean()),
+          }),
+        ),
+        leftNotes: v.optional(
+          v.array(
+            v.object({
+              pitch: v.string(),
+              duration: v.number(),
+              rest: v.optional(v.boolean()),
+              tied: v.optional(v.boolean()),
+            }),
+          ),
+        ),
+      }),
+    ),
+    rightHandOnly: v.boolean(), // true = lead-sheet style, false = grand staff
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_date", ["userId", "createdAt"]),
 });
