@@ -862,6 +862,7 @@ export default function SongDetailPage() {
               right={rightNotes}
               left={leftNotes}
               currentBeat={currentBeat}
+              keySig={doc.key}
             />
           </div>
         </motion.div>

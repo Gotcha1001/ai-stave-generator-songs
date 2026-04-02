@@ -10,7 +10,7 @@ export interface MusicNote {
 }
 
 export interface Bar {
-  chord: string;
+  chord?: string;
   chordName?: string;
   notes: MusicNote[];
   leftNotes?: MusicNote[]; // 👈 add — left hand for classical notation, absent for lead sheet
@@ -36,6 +36,7 @@ export interface MusicPiece {
   sections: Section[];
   structure: string[]; // e.g. ["A","A","B","A"]
   description?: string; // AI-generated performance notes
+  notation?: "lead-sheet" | "classical";
 }
 
 export type Clef = "treble" | "bass";
