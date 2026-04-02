@@ -8,20 +8,19 @@ import { NoteType } from "./musicGenerator";
 export function musicNoteToVexNote(note: MusicNote): NoteType {
   let vexDuration: string;
 
-  // Map your number durations to VexFlow strings
   switch (note.duration) {
     case 4:
       vexDuration = "w";
       break;
     case 3:
       vexDuration = "hd";
-      break; // half dotted
+      break;
     case 2:
       vexDuration = "h";
       break;
     case 1.5:
       vexDuration = "qd";
-      break; // quarter dotted
+      break;
     case 1:
       vexDuration = "q";
       break;
@@ -40,7 +39,6 @@ export function musicNoteToVexNote(note: MusicNote): NoteType {
     pitch: note.pitch,
     duration: vexDuration,
     isRest: note.rest ?? false,
-    // If you later add ties/dynamics in MIDI recording, map them here too
   };
 }
 
@@ -58,6 +56,7 @@ export const CHROMATIC = [
   "A#",
   "B",
 ] as const;
+
 export const DIATONIC = ["C", "D", "E", "F", "G", "A", "B"] as const;
 
 export const SCALE_INTERVALS = {
@@ -68,15 +67,10 @@ export const SCALE_INTERVALS = {
   blues: [0, 3, 5, 6, 7, 10],
 } as const;
 
-// Key signatures: sharps or flats on the staff
+// Key signatures
 export const KEY_SIGNATURES: Record<
   string,
-  {
-    sharps: number;
-    flats: number;
-    isMinor: boolean;
-    relative?: string;
-  }
+  { sharps: number; flats: number; isMinor: boolean; relative?: string }
 > = {
   C: { sharps: 0, flats: 0, isMinor: false },
   G: { sharps: 1, flats: 0, isMinor: false },
@@ -105,7 +99,6 @@ export const DURATION_NAMES: Record<number, string> = {
   0.25: "Semiquaver (Sixteenth)",
 };
 
-// Note value weights by difficulty
 export const DURATION_WEIGHTS: Record<
   string,
   Array<{ v: number; w: number }>
@@ -119,18 +112,17 @@ export const DURATION_WEIGHTS: Record<
     { v: 4, w: 0.05 },
     { v: 2, w: 0.2 },
     { v: 1, w: 0.4 },
-    { v: 0.5, w: 0.35 }, // quavers!
+    { v: 0.5, w: 0.35 },
   ],
   advanced: [
     { v: 4, w: 0.03 },
     { v: 2, w: 0.12 },
     { v: 1, w: 0.3 },
-    { v: 0.5, w: 0.38 }, // quavers!
-    { v: 0.25, w: 0.17 }, // semiquavers!
+    { v: 0.5, w: 0.38 },
+    { v: 0.25, w: 0.17 },
   ],
 };
 
-// Dotted note pairs for 3/4 and 6/8
 export const GENRE_DURATION_OVERRIDES: Record<
   string,
   Array<{ v: number; w: number }>
@@ -177,7 +169,6 @@ export function parsePitch(
   return { note: m[1], octave: parseInt(m[2]) };
 }
 
-// Convert pitch to MIDI number
 export function pitchToMidi(note: string, octave: number): number {
   const enhar: Record<string, string> = {
     Db: "C#",
@@ -198,7 +189,6 @@ export function midiToFreq(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
-// Staff position: treble clef middle line = B4 = pos 0, up = positive
 export function getStaffPosition(
   note: string,
   octave: number,
@@ -207,40 +197,36 @@ export function getStaffPosition(
   const noteBase = note.replace("#", "").replace("b", "");
   const idx = DIATONIC.indexOf(noteBase as (typeof DIATONIC)[number]);
   if (idx === -1) return 0;
+
   if (clef === "treble") {
-    // B4 = reference (middle of treble staff)
-    return (octave - 4) * 7 + (idx - 6); // B is index 6
+    return (octave - 4) * 7 + (idx - 6); // B4 reference
   } else {
-    // D3 = reference (middle of bass staff)
-    return (octave - 3) * 7 + (idx - 1); // D is index 1
+    return (octave - 3) * 7 + (idx - 1); // D3 reference
   }
 }
 
 export function beatsPerBar(timeSig: string): number {
   const [n, d] = timeSig.split("/").map(Number);
-  // For 6/8: 6 eighth notes = 2 beats of 3, so 3 beat-units of 1 each if unit=0.5
   if (d === 8) return n * 0.5;
   return n;
 }
 
 export function getBarDuration(timeSig: string): number {
   const [num, denom] = timeSig.split("/").map(Number);
-  if (!num || !denom) return 4; // fallback
-
-  // General formula: (numerator / denominator) × 4 quarters
+  if (!num || !denom) return 4;
   return (num / denom) * 4;
 }
 
 export function midiToPitch(midi: number, preferFlats = false): string {
   if (midi < 0 || midi > 127) {
-    console.warn(`MIDI note ${midi} out of range (0-127)`);
-    return "C4"; // fallback
+    console.warn(`MIDI note ${midi} out of range`);
+    return "C4";
   }
 
   const noteIndex = midi % 12;
   const octave = Math.floor(midi / 12) - 1;
 
-  const sharpNames = CHROMATIC; // already defined: ["C", "C#", "D", ...]
+  const sharpNames = CHROMATIC;
   const flatNames = [
     "C",
     "Db",
@@ -257,100 +243,81 @@ export function midiToPitch(midi: number, preferFlats = false): string {
   ];
 
   const noteName = preferFlats ? flatNames[noteIndex] : sharpNames[noteIndex];
-
   return `${noteName}${octave}`;
 }
 
-// The notes that each key signature makes sharp or flat, in order
+// ===================================================================
+// NEW: Should we display an accidental symbol?
+// ===================================================================
 const SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"];
 const FLAT_ORDER = ["B", "E", "A", "D", "G", "C", "F"];
 
-/**
- * Given a pitch like "F#4" or "Bb3" and the current key (e.g. "G", "Bb", "Am"),
- * returns the pitch with the accidental stripped if the key signature already
- * implies it — i.e. "F#4" in G major becomes "F4".
- * Chromatic notes outside the key are left unchanged.
- */
+export function shouldShowAccidental(pitch: string, key: string): boolean {
+  if (!pitch || pitch === "rest") return false;
+
+  const parsed = parsePitch(pitch);
+  if (!parsed) return false;
+
+  // No accidental → nothing to show
+  if (!parsed.note.includes("#") && !parsed.note.includes("b")) return false;
+
+  const keySig = KEY_SIGNATURES[key];
+  if (!keySig) return true;
+
+  const letter = parsed.note[0];
+  const acc = parsed.note[1];
+
+  if (acc === "#" && keySig.sharps > 0) {
+    const sharpsInKey = SHARP_ORDER.slice(0, keySig.sharps);
+    return !sharpsInKey.includes(letter);
+  }
+
+  if (acc === "b" && keySig.flats > 0) {
+    const flatsInKey = FLAT_ORDER.slice(0, keySig.flats);
+    return !flatsInKey.includes(letter);
+  }
+
+  return true; // chromatic accidental outside key signature
+}
+
+// ===================================================================
+// Legacy functions (kept for backward compatibility)
+// ===================================================================
+
+/** @deprecated Use shouldShowAccidental instead */
 export function stripKeyAccidental(pitch: string, key: string): string {
   if (!pitch || pitch === "rest") return pitch;
 
-  // Resolve minor keys to their relative major for sharp/flat counting
   const keySig = KEY_SIGNATURES[key];
-  if (!keySig) return pitch; // unknown key — leave as-is
+  if (!keySig) return pitch;
 
-  const { sharps, flats } = keySig;
-
-  // Parse the pitch: e.g. "F#4" → noteName="F#", octave="4"
   const match = pitch.match(/^([A-Ga-g][#b]?)(\d+)$/);
   if (!match) return pitch;
 
   const [, noteName, octave] = match;
   const letter = noteName[0].toUpperCase();
-  const acc = noteName.slice(1); // "#", "b", or ""
+  const acc = noteName.slice(1);
 
-  if (acc === "#" && sharps > 0) {
-    // Check if this sharp is in the key signature
-    const sharpsInKey = SHARP_ORDER.slice(0, sharps);
-    if (sharpsInKey.includes(letter)) {
-      return letter + octave; // remove the "#" — key sig covers it
-    }
+  if (acc === "#" && keySig.sharps > 0) {
+    const sharpsInKey = SHARP_ORDER.slice(0, keySig.sharps);
+    if (sharpsInKey.includes(letter)) return letter + octave;
   }
 
-  if (acc === "b" && flats > 0) {
-    const flatsInKey = FLAT_ORDER.slice(0, flats);
-    if (flatsInKey.includes(letter)) {
-      return letter + octave; // remove the "b" — key sig covers it
-    }
+  if (acc === "b" && keySig.flats > 0) {
+    const flatsInKey = FLAT_ORDER.slice(0, keySig.flats);
+    if (flatsInKey.includes(letter)) return letter + octave;
   }
 
-  return pitch; // chromatic note — keep accidental
+  return pitch;
 }
 
-/**
- * Inverse of stripKeyAccidental.
- * Given a pitch like "F4" in G major, returns "F#4" so playback
- * sounds the correct pitch implied by the key signature.
- */
-// export function restoreKeyAccidental(pitch: string, key: string): string {
-//   if (!pitch || pitch === "rest") return pitch;
-
-//   const keySig = KEY_SIGNATURES[key];
-//   if (!keySig) return pitch;
-
-//   const match = pitch.match(/^([A-Ga-g])(\d+)$/);
-//   if (!match) return pitch; // already has accidental or is unusual — leave alone
-
-//   const [, letter, octave] = match;
-//   const upper = letter.toUpperCase();
-//   const { sharps, flats } = keySig;
-
-//   if (sharps > 0) {
-//     const sharpsInKey = SHARP_ORDER.slice(0, sharps);
-//     if (sharpsInKey.includes(upper)) return upper + "#" + octave;
-//   }
-
-//   if (flats > 0) {
-//     const flatsInKey = FLAT_ORDER.slice(0, flats);
-//     if (flatsInKey.includes(upper)) return upper + "b" + octave;
-//   }
-
-//   return pitch;
-// }
-
-/**
- * Inverse of stripKeyAccidental.
- * Given a pitch like "F4" that was stored without its accidental
- * (because the key signature covers it), returns "F#4" so playback
- * sounds the note the key signature implies.
- * Only acts on pitches that are a plain letter+octave (no accidental).
- */
+/** @deprecated We no longer strip accidentals — we store full pitches */
 export function restoreKeyAccidental(pitch: string, key: string): string {
   if (!pitch || pitch === "rest") return pitch;
 
   const keySig = KEY_SIGNATURES[key];
   if (!keySig) return pitch;
 
-  // Only act on bare pitches like "F4", "B3" — not "F#4" or "Bb3"
   const match = pitch.match(/^([A-G])(\d+)$/);
   if (!match) return pitch;
 
