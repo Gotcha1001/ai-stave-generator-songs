@@ -455,7 +455,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Staff from "@/app/components/Staff";
-import MetronomeDrumTrack from "@/app/components/Metronomedrumtrack"; // ← ADD
+import MetronomeDrumTrack from "@/app/components/Metronomedrumtrack";
 import * as Tone from "tone";
 import jsPDF from "jspdf";
 
@@ -512,7 +512,15 @@ export default function SongDetailPage() {
   const songId = params.songId as Id<"songs">;
   const doc = useQuery(api.songs.getSongById, { id: songId });
   const deleteSong = useMutation(api.songs.deleteSong);
+
+  // staffContainerRef is kept for legacy fallback only — export now uses exportRef
   const staffContainerRef = useRef<HTMLDivElement>(null);
+
+  // exportRef: Staff wires a canvas-render function here when it mounts.
+  // Calling exportRef.current() re-renders the score via VexFlow's Canvas backend
+  // so music fonts resolve correctly and noteheads appear filled (not as rectangles).
+  const exportRef = useRef<(() => HTMLCanvasElement | null) | null>(null);
+
   const partRef = useRef<Tone.Part | null>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -557,7 +565,7 @@ export default function SongDetailPage() {
     Tone.getTransport().cancel();
     partRef.current?.dispose();
     partRef.current = null;
-    setIsPlaying(false); // ← metronome stops
+    setIsPlaying(false);
   }, []);
 
   const startPlayback = useCallback(async () => {
@@ -624,7 +632,7 @@ export default function SongDetailPage() {
     part.start(0);
     partRef.current = part;
     Tone.getTransport().start();
-    setIsPlaying(true); // ← metronome starts
+    setIsPlaying(true);
 
     rafRef.current = requestAnimationFrame(updateClockRef.current);
 
@@ -646,52 +654,40 @@ export default function SongDetailPage() {
     router.push("/songs");
   };
 
+  // ── PDF Export ───────────────────────────────────────────────────────────────
+  // Uses the canvas render from exportRef (VexFlow Canvas backend) instead of
+  // serializing the live SVG. This avoids the Bravura font loss that causes
+  // noteheads to appear as empty rectangles in the exported PDF.
   const handleExportPDF = useCallback(() => {
-    const container = staffContainerRef.current;
-    if (!container) return;
-    const svg = container.querySelector("svg");
-    if (!svg) return;
-    const svgData = new XMLSerializer().serializeToString(svg);
-    const svgBlob = new Blob([svgData], {
-      type: "image/svg+xml;charset=utf-8",
+    const canvas = exportRef.current?.();
+    if (!canvas) return;
+
+    const imgData = canvas.toDataURL("image/png");
+    const pdf = new jsPDF({
+      orientation: "landscape",
+      unit: "px",
+      format: "a4",
     });
-    const url = URL.createObjectURL(svgBlob);
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      const scale = 2;
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      const ctx = canvas.getContext("2d")!;
-      ctx.scale(scale, scale);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, img.width, img.height);
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        orientation: "landscape",
-        unit: "px",
-        format: "a4",
-      });
-      const pw = pdf.internal.pageSize.getWidth(),
-        ph = pdf.internal.pageSize.getHeight();
-      const imgH = (canvas.height * pw) / canvas.width;
-      if (imgH <= ph) {
-        pdf.addImage(imgData, "PNG", 0, 0, pw, imgH);
-      } else {
-        let y = 0;
-        while (y < imgH) {
-          if (y > 0) pdf.addPage();
-          pdf.addImage(imgData, "PNG", 0, -y, pw, imgH);
-          y += ph;
-        }
+
+    const pw = pdf.internal.pageSize.getWidth();
+    const ph = pdf.internal.pageSize.getHeight();
+    const imgH = (canvas.height * pw) / canvas.width;
+
+    if (imgH <= ph) {
+      pdf.addImage(imgData, "PNG", 0, 0, pw, imgH);
+    } else {
+      let y = 0;
+      while (y < imgH) {
+        if (y > 0) pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, -y, pw, imgH);
+        y += ph;
       }
-      pdf.save(`piano-piece-${songId}.pdf`);
-    };
-    img.src = url;
+    }
+
+    pdf.save(`piano-piece-${songId}.pdf`);
   }, [songId]);
 
+  // ── Loading / not-found states ───────────────────────────────────────────────
   if (doc === undefined)
     return (
       <div className="min-h-screen bg-stone-950 flex items-center justify-center">
@@ -724,7 +720,6 @@ export default function SongDetailPage() {
     duration: n.duration,
     isRest: n.pitch === "rest",
   }));
-  const barCount = Math.floor(doc.rightHand.length / 4);
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-200">
@@ -833,10 +828,7 @@ export default function SongDetailPage() {
           </div>
         </motion.div>
 
-        {/* ── Metronome / Drum Track ─────────────────────────────────────────
-             tempo    = local tempo state, driven by the slider above
-             isPlaying = local isPlaying state, driven by the Play button above
-        ────────────────────────────────────────────────────────────────────── */}
+        {/* Metronome / Drum Track */}
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -863,6 +855,8 @@ export default function SongDetailPage() {
               left={leftNotes}
               currentBeat={currentBeat}
               keySig={doc.key}
+              timeSig={doc.timeSig ?? "4/4"}
+              exportRef={exportRef}
             />
           </div>
         </motion.div>

@@ -1000,17 +1000,17 @@ import {
   Barline,
   Beam,
   Accidental,
-  Fraction,
   Dot,
+  Fraction,
 } from "vexflow";
 
 import { RenderContext, StaveNote, StaveTie } from "vexflow";
 
-import { shouldShowAccidental } from "@/lib/musicTheory"; // ← NEW IMPORT
+import { shouldShowAccidental } from "@/lib/musicTheory";
 
 export interface NoteType {
   pitch: string;
-  duration: string; // "w" | "h" | "hd" | "q" | "qd" | "8" | "8d" | "16"
+  duration: string;
   isRest?: boolean;
   dynamic?: string;
   tie?: boolean;
@@ -1022,7 +1022,11 @@ interface StaffProps {
   left: NoteType[];
   currentBeat?: number;
   timeSig?: string;
-  keySig?: string; // e.g. "G", "Bb", "Am"
+  keySig?: string;
+  /** When provided, Staff wires up a canvas-based render function for PDF export.
+   *  Call exportRef.current() to get an HTMLCanvasElement with the score drawn
+   *  via VexFlow's Canvas backend (fonts resolve correctly → no empty rectangles). */
+  exportRef?: React.MutableRefObject<(() => HTMLCanvasElement | null) | null>;
 }
 
 const DUR_TO_TICKS: Record<string, number> = {
@@ -1049,8 +1053,6 @@ const VEX_DUR_BASE: Record<string, string> = {
   "16": "16",
 };
 
-const VALID_DURATIONS = new Set(Object.keys(DUR_TO_TICKS));
-
 function getVoiceAndTickParams(timeSig: string = "4/4") {
   switch (timeSig) {
     case "3/4":
@@ -1059,43 +1061,31 @@ function getVoiceAndTickParams(timeSig: string = "4/4") {
       return { numBeats: 6, beatValue: 8, ticksPerBar: 300 };
     case "2/4":
       return { numBeats: 2, beatValue: 4, ticksPerBar: 200 };
-    case "2/2":
-      return { numBeats: 2, beatValue: 2, ticksPerBar: 400 };
     default:
       return { numBeats: 4, beatValue: 4, ticksPerBar: 400 };
   }
 }
 
-const CLEF_TIMESIG_OVERHEAD = 90;
-
-function calcStemDir(pitch: string, clef: "treble" | "bass"): number {
-  if (!pitch || pitch === "rest") return Stem.UP;
-
-  const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
-  if (!m) return Stem.UP;
-
-  const order = ["C", "D", "E", "F", "G", "A", "B"];
-  const pos = parseInt(m[3]) * 7 + order.indexOf(m[1]);
-  const mid = clef === "treble" ? 34 : 22;
-  return pos >= mid ? Stem.DOWN : Stem.UP;
-}
-
 function clampPitch(pitch: string, clef: "treble" | "bass"): string {
   if (!pitch || pitch === "rest") return pitch;
-
-  const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
+  const m = pitch.match(/^([A-G])(#|b)?(\d+)$/);
   if (!m) return pitch;
-
-  const note = m[1];
-  const acc = m[2] ?? "";
   let octave = parseInt(m[3]);
-
   octave =
     clef === "treble"
       ? Math.min(Math.max(octave, 3), 6)
       : Math.min(Math.max(octave, 1), 4);
+  return `${m[1]}${m[2] ?? ""}${octave}`;
+}
 
-  return `${note}${acc}${octave}`;
+function pitchToVexKey(pitch: string): string {
+  if (!pitch || pitch === "rest") return "b/4";
+  const m = pitch.match(/^([A-G])(#|b)?(\d+)$/);
+  if (!m) return "b/4";
+  const note = m[1].toLowerCase();
+  const acc = m[2] ?? "";
+  const octave = m[3];
+  return `${note}${acc}/${octave}`;
 }
 
 function bestDur(ticks: number): string {
@@ -1111,9 +1101,8 @@ function bestDur(ticks: number): string {
 }
 
 function sanitizeNote(note: NoteType): NoteType {
-  const dur = VALID_DURATIONS.has(note.duration) ? note.duration : "q";
-  const isRest =
-    note.isRest || !note.pitch || note.pitch === "rest" || note.pitch === "";
+  const dur = DUR_TO_TICKS[note.duration] ? note.duration : "q";
+  const isRest = note.isRest || !note.pitch || note.pitch === "rest";
   return { ...note, duration: dur, isRest };
 }
 
@@ -1126,14 +1115,12 @@ function splitIntoBars(
   let current: NoteType[] = [];
   let acc = 0;
 
-  const closebar = () => {
+  const closeBar = () => {
     let rem = ticksPerBar - acc;
     while (rem > 0) {
-      const dur = bestDur(rem);
-      const durTicks = DUR_TO_TICKS[dur] ?? 0;
-      if (durTicks <= 0) break;
-      current.push({ pitch: "rest", duration: dur, isRest: true });
-      rem -= durTicks;
+      const d = bestDur(rem);
+      current.push({ pitch: "rest", duration: d, isRest: true });
+      rem -= DUR_TO_TICKS[d] || 100;
     }
     bars.push(current);
     current = [];
@@ -1142,68 +1129,28 @@ function splitIntoBars(
 
   for (const note of notes) {
     const ticks = DUR_TO_TICKS[note.duration] ?? 100;
-
-    if (ticks > ticksPerBar) {
-      let rem = ticks;
-      while (rem > 0) {
-        const space = ticksPerBar - acc;
-        const chunk = Math.min(rem, space);
-        const chunkDur = bestDur(chunk);
-        const chunkTicks = DUR_TO_TICKS[chunkDur] ?? chunk;
-        const isLast = rem - chunkTicks <= 0;
-
-        current.push({ ...note, duration: chunkDur, tie: !isLast });
-        acc += chunkTicks;
-        rem -= chunkTicks;
-        if (acc >= ticksPerBar) closebar();
-      }
-      continue;
-    }
-
-    if (acc + ticks > ticksPerBar) closebar();
-    current.push({ ...note });
+    if (acc + ticks > ticksPerBar) closeBar();
+    current.push(note);
     acc += ticks;
-    if (acc >= ticksPerBar) closebar();
+    if (acc >= ticksPerBar) closeBar();
   }
-
-  if (current.length > 0) closebar();
-
-  return bars.map((bar) => {
-    const total = bar.reduce((s, n) => s + (DUR_TO_TICKS[n.duration] ?? 0), 0);
-    if (Math.abs(total - ticksPerBar) > 2) {
-      return [{ pitch: "rest", duration: bestDur(ticksPerBar), isRest: true }];
-    }
-    return bar;
-  });
+  if (current.length) closeBar();
+  return bars;
 }
 
-function pitchToKey(pitch: string): string {
-  if (!pitch || pitch === "rest") return "b/4";
-  const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
-  if (!m) return "b/4";
-  return `${m[1].toLowerCase()}${m[2] ?? ""}/${m[3]}`;
-}
-
-function getAccidental(pitch: string): "#" | "b" | null {
-  const m = pitch.match(/^[A-G](#|b)\d$/);
-  return m ? (m[1] as "#" | "b") : null;
-}
-
-// Updated makeNote using the new shouldShowAccidental
 function makeNote(
   note: NoteType,
   clef: "treble" | "bass",
-  keySig = "C",
+  keySig: string,
 ): StaveNote {
-  const restKey = clef === "treble" ? "b/4" : "d/3";
-  const isRest = note.isRest || note.pitch === "rest" || !note.pitch;
+  const isRest = note.isRest || !note.pitch || note.pitch === "rest";
   const isDotted = note.duration.endsWith("d");
-  const vexDur = VEX_DUR_BASE[note.duration] ?? note.duration.replace("d", "");
+  const vexDur = VEX_DUR_BASE[note.duration] ?? "q";
 
   if (isRest) {
     const sn = new StaveNote({
       clef,
-      keys: [restKey],
+      keys: [clef === "treble" ? "b/4" : "d/3"],
       duration: vexDur + "r",
     });
     if (isDotted) Dot.buildAndAttach([sn], { all: true });
@@ -1211,22 +1158,20 @@ function makeNote(
   }
 
   const safePitch = clampPitch(note.pitch, clef);
-  const key = pitchToKey(safePitch);
-  const stemDirection = calcStemDir(safePitch, clef);
+  const vexKey = pitchToVexKey(safePitch);
 
   const sn = new StaveNote({
     clef,
-    keys: [key],
+    keys: [vexKey],
     duration: vexDur,
-    stemDirection,
+    stemDirection: Stem.UP,
   });
 
   if (isDotted) Dot.buildAndAttach([sn], { all: true });
 
-  // NEW: Use the shared function from musicTheory.ts
-  const acc = getAccidental(safePitch);
-  if (acc && shouldShowAccidental(safePitch, keySig)) {
-    sn.addModifier(new Accidental(acc), 0);
+  if (shouldShowAccidental(safePitch, keySig)) {
+    const accSymbol = safePitch.includes("#") ? "#" : "b";
+    sn.addModifier(new Accidental(accSymbol), 0);
   }
 
   return sn;
@@ -1237,23 +1182,15 @@ function buildBeams(
   numBeats: number,
   beatValue: number,
 ): Beam[] {
-  const groups = beatValue === 8 ? [new Fraction(3, 8)] : [new Fraction(2, 8)];
   return Beam.generateBeams(notes, {
-    groups,
+    groups: beatValue === 8 ? [new Fraction(3, 8)] : [new Fraction(2, 8)],
     stemDirection: -1,
-    beamMiddleOnly: false,
   });
 }
 
 function drawTies(ctx: RenderContext, notes: StaveNote[], data: NoteType[]) {
   for (let i = 0; i < data.length - 1; i++) {
-    if (!data[i].tie) continue;
-
-    const cur = data[i];
-    const next = data[i + 1];
-    const samePitch = !cur.isRest && !next.isRest && cur.pitch === next.pitch;
-
-    if (cur.tie || (cur.tieId && cur.tieId === next.tieId) || samePitch) {
+    if (data[i].tie || data[i].tieId) {
       try {
         new StaveTie({
           firstNote: notes[i],
@@ -1263,13 +1200,103 @@ function drawTies(ctx: RenderContext, notes: StaveNote[], data: NoteType[]) {
         })
           .setContext(ctx)
           .draw();
-      } catch {
-        console.log("Tie drawing failed");
-      }
+      } catch {}
     }
   }
 }
 
+// ── Shared draw routine ────────────────────────────────────────────────────────
+// Used by both the live SVG render and the canvas export render so layout is
+// always identical between what you see on screen and what ends up in the PDF.
+function drawScore(
+  ctx: RenderContext,
+  rightBars: NoteType[][],
+  leftBars: NoteType[][],
+  timeSig: string,
+  keySig: string,
+) {
+  const { numBeats, beatValue } = getVoiceAndTickParams(timeSig);
+  const totalBars = Math.max(rightBars.length, leftBars.length);
+  const totalRows = Math.ceil(totalBars / BARS_PER_ROW);
+
+  for (let row = 0; row < totalRows; row++) {
+    const rowY = row * ROW_HEIGHT;
+    const barsInRow = Math.min(BARS_PER_ROW, totalBars - row * BARS_PER_ROW);
+
+    for (let b = 0; b < barsInRow; b++) {
+      const barIdx = row * BARS_PER_ROW + b;
+      const isFirstInRow = b === 0;
+      const isLastBar = barIdx === totalBars - 1;
+
+      const staveX = isFirstInRow
+        ? LEFT_MARGIN
+        : LEFT_MARGIN + CLEF_WIDTH + b * BAR_WIDTH;
+      const staveWidth = isFirstInRow ? CLEF_WIDTH + BAR_WIDTH : BAR_WIDTH;
+
+      const treble = new Stave(staveX, rowY + TREBLE_Y, staveWidth);
+      const bass = new Stave(staveX, rowY + BASS_Y, staveWidth);
+
+      if (isFirstInRow) {
+        treble
+          .addClef("treble")
+          .addTimeSignature(timeSig)
+          .addKeySignature(keySig);
+        bass.addClef("bass").addTimeSignature(timeSig).addKeySignature(keySig);
+      }
+      if (isLastBar) {
+        treble.setEndBarType(Barline.type.END);
+        bass.setEndBarType(Barline.type.END);
+      }
+
+      treble.setContext(ctx).draw();
+      bass.setContext(ctx).draw();
+
+      if (isFirstInRow) {
+        new StaveConnector(treble, bass)
+          .setType("brace")
+          .setContext(ctx)
+          .draw();
+        new StaveConnector(treble, bass)
+          .setType("singleLeft")
+          .setContext(ctx)
+          .draw();
+      }
+      new StaveConnector(treble, bass)
+        .setType("singleRight")
+        .setContext(ctx)
+        .draw();
+
+      const formatterW = isFirstInRow ? BAR_WIDTH - 90 : BAR_WIDTH - 12;
+
+      const rData = rightBars[barIdx] || [];
+      const lData = leftBars[barIdx] || [];
+
+      const rNotes = rData.map((n) => makeNote(n, "treble", keySig));
+      const lNotes = lData.map((n) => makeNote(n, "bass", keySig));
+
+      const rBeams = buildBeams(rNotes, numBeats, beatValue);
+      const lBeams = buildBeams(lNotes, numBeats, beatValue);
+
+      const rVoice = new Voice({ numBeats, beatValue }).addTickables(rNotes);
+      const lVoice = new Voice({ numBeats, beatValue }).addTickables(lNotes);
+
+      new Formatter()
+        .joinVoices([rVoice, lVoice])
+        .format([rVoice, lVoice], formatterW);
+
+      rVoice.draw(ctx, treble);
+      lVoice.draw(ctx, bass);
+
+      drawTies(ctx, rNotes, rData);
+      drawTies(ctx, lNotes, lData);
+
+      rBeams.forEach((beam) => beam.setContext(ctx).draw());
+      lBeams.forEach((beam) => beam.setContext(ctx).draw());
+    }
+  }
+}
+
+// Layout constants
 const BARS_PER_ROW = 4;
 const LEFT_MARGIN = 20;
 const CLEF_WIDTH = 90;
@@ -1284,132 +1311,89 @@ export default function Staff({
   currentBeat = 0,
   timeSig = "4/4",
   keySig = "C",
+  exportRef,
 }: StaffProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLCanvasElement>(null);
 
-  const { numBeats, beatValue, ticksPerBar } = getVoiceAndTickParams(timeSig);
+  const { ticksPerBar } = getVoiceAndTickParams(timeSig);
 
+  // ── Live SVG render ──────────────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
     el.innerHTML = "";
     if (!right.length && !left.length) return;
 
+    const { ticksPerBar } = getVoiceAndTickParams(timeSig);
     const rightBars = splitIntoBars(right, ticksPerBar);
     const leftBars = splitIntoBars(left, ticksPerBar);
     const totalBars = Math.max(rightBars.length, leftBars.length);
-
-    if (totalBars === 0) return;
-
     const totalRows = Math.ceil(totalBars / BARS_PER_ROW);
+
     const canvasW = LEFT_MARGIN + CLEF_WIDTH + BARS_PER_ROW * BAR_WIDTH + 30;
-    const canvasH = totalRows * ROW_HEIGHT + 60;
+    const canvasH = totalRows * ROW_HEIGHT + 80;
 
     const renderer = new Renderer(el, Renderer.Backends.SVG);
     renderer.resize(canvasW, canvasH);
     const ctx = renderer.getContext();
-    ctx.setFont("Arial", 10);
 
-    const fallbackBar = (): NoteType[] => [
-      { pitch: "rest", duration: bestDur(ticksPerBar), isRest: true },
-    ];
+    drawScore(ctx, rightBars, leftBars, timeSig, keySig);
+  }, [right, left, timeSig, keySig]);
 
-    for (let row = 0; row < totalRows; row++) {
-      const rowY = row * ROW_HEIGHT;
-      const barsInRow = Math.min(BARS_PER_ROW, totalBars - row * BARS_PER_ROW);
+  // ── Canvas export render (wired to exportRef) ────────────────────────────────
+  // VexFlow's Canvas backend resolves music fonts from the live document context,
+  // so noteheads draw as filled glyphs — unlike serialized SVG which loses the
+  // Bravura font reference and renders empty rectangles.
+  useEffect(() => {
+    if (!exportRef) return;
 
-      for (let b = 0; b < barsInRow; b++) {
-        const barIdx = row * BARS_PER_ROW + b;
-        const isFirstInRow = b === 0;
-        const isLastBar = barIdx === totalBars - 1;
+    exportRef.current = (): HTMLCanvasElement | null => {
+      if (!right.length && !left.length) return null;
 
-        const staveX = isFirstInRow
-          ? LEFT_MARGIN
-          : LEFT_MARGIN + CLEF_WIDTH + b * BAR_WIDTH;
+      const { ticksPerBar } = getVoiceAndTickParams(timeSig);
+      const rightBars = splitIntoBars(right, ticksPerBar);
+      const leftBars = splitIntoBars(left, ticksPerBar);
+      const totalBars = Math.max(rightBars.length, leftBars.length);
+      const totalRows = Math.ceil(totalBars / BARS_PER_ROW);
 
-        const staveWidth = isFirstInRow ? CLEF_WIDTH + BAR_WIDTH : BAR_WIDTH;
+      const scoreW = LEFT_MARGIN + CLEF_WIDTH + BARS_PER_ROW * BAR_WIDTH + 30;
+      const scoreH = totalRows * ROW_HEIGHT + 80;
+      const SCALE = 2; // retina-quality output
 
-        const treble = new Stave(staveX, rowY + TREBLE_Y, staveWidth);
-        const bass = new Stave(staveX, rowY + BASS_Y, staveWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = scoreW * SCALE;
+      canvas.height = scoreH * SCALE;
 
-        if (isFirstInRow) {
-          treble
-            .addClef("treble")
-            .addTimeSignature(timeSig)
-            .addKeySignature(keySig);
-          bass
-            .addClef("bass")
-            .addTimeSignature(timeSig)
-            .addKeySignature(keySig);
-        }
+      // Briefly attach to DOM so the browser font engine resolves Bravura/music fonts
+      canvas.style.position = "fixed";
+      canvas.style.top = "-9999px";
+      canvas.style.left = "-9999px";
+      canvas.style.visibility = "hidden";
+      document.body.appendChild(canvas);
 
-        if (isLastBar) {
-          treble.setEndBarType(Barline.type.END);
-          bass.setEndBarType(Barline.type.END);
-        }
+      try {
+        const ctx2d = canvas.getContext("2d")!;
+        ctx2d.scale(SCALE, SCALE);
+        ctx2d.fillStyle = "#ffffff";
+        ctx2d.fillRect(0, 0, scoreW, scoreH);
 
-        treble.setContext(ctx).draw();
-        bass.setContext(ctx).draw();
+        const renderer = new Renderer(canvas, Renderer.Backends.CANVAS);
+        renderer.resize(scoreW * SCALE, scoreH * SCALE);
+        const vexCtx = renderer.getContext();
+        // VexFlow's canvas context wraps the 2d context; scale is already applied
+        // via the ctx2d.scale call above, so we do NOT scale vexCtx again.
 
-        if (isFirstInRow) {
-          new StaveConnector(treble, bass)
-            .setType("brace")
-            .setContext(ctx)
-            .draw();
-          new StaveConnector(treble, bass)
-            .setType("singleLeft")
-            .setContext(ctx)
-            .draw();
-        }
-        new StaveConnector(treble, bass)
-          .setType("singleRight")
-          .setContext(ctx)
-          .draw();
-
-        const formatterW = isFirstInRow
-          ? BAR_WIDTH - CLEF_TIMESIG_OVERHEAD
-          : BAR_WIDTH - 12;
-
-        const rData = rightBars[barIdx] ?? fallbackBar();
-        const lData = leftBars[barIdx] ?? fallbackBar();
-
-        const rNotes = rData.map((n) => makeNote(n, "treble", keySig));
-        const lNotes = lData.map((n) => makeNote(n, "bass", keySig));
-
-        const rBeams = buildBeams(rNotes, numBeats, beatValue);
-        const lBeams = buildBeams(lNotes, numBeats, beatValue);
-
-        const rVoice = new Voice({ numBeats, beatValue })
-          .setMode(Voice.Mode.SOFT)
-          .addTickables(rNotes);
-
-        const lVoice = new Voice({ numBeats, beatValue })
-          .setMode(Voice.Mode.SOFT)
-          .addTickables(lNotes);
-
-        try {
-          new Formatter()
-            .joinVoices([rVoice, lVoice])
-            .format([rVoice, lVoice], formatterW, { alignRests: true });
-        } catch (e) {
-          console.warn("Formatter error on bar", barIdx, e);
-        }
-
-        rVoice.draw(ctx, treble);
-        lVoice.draw(ctx, bass);
-
-        drawTies(ctx, rNotes, rData);
-        drawTies(ctx, lNotes, lData);
-
-        rBeams.forEach((bm) => bm.setContext(ctx).draw());
-        lBeams.forEach((bm) => bm.setContext(ctx).draw());
+        drawScore(vexCtx, rightBars, leftBars, timeSig, keySig);
+      } finally {
+        document.body.removeChild(canvas);
       }
-    }
-  }, [right, left, timeSig, keySig, numBeats, beatValue, ticksPerBar]);
 
-  // Playhead overlay (unchanged)
+      return canvas;
+    };
+  }, [right, left, timeSig, keySig, exportRef]);
+
+  // ── Playhead overlay ─────────────────────────────────────────────────────────
   useEffect(() => {
     const container = containerRef.current;
     const canvas = cursorRef.current;
@@ -1478,7 +1462,7 @@ export default function Staff({
     >
       <div
         ref={containerRef}
-        className="overflow-x-auto"
+        className="overflow-x-auto vexflow-container"
         style={{ lineHeight: 0 }}
       />
       <canvas
